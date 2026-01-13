@@ -19,6 +19,9 @@ description: Use when integrating agentic-django into a Django project, includin
 - `references/htmx.md`: HTMX polling + fragment usage.
 - `references/events.md`: event streaming endpoint + signal usage.
 - `references/operations.md`: retention policy, cleanup commands, and recovery.
+- `references/architecture.md`: run lifecycle, task dispatch, and concurrency notes.
+- `references/data-model.md`: models, session storage, and serialization invariants.
+- `references/errors-security.md`: error handling, ownership, and safety guidance.
 
 ## Key invariants
 - Settings prefix: `AGENTIC_DJANGO_*` only.

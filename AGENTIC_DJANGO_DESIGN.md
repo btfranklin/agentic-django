@@ -243,26 +243,6 @@ Register admin models for `AgentSession`, `AgentRun`, and `AgentEvent` (if enabl
 - Template tests confirming HTMX fragments render correctly for each status.
 - Optional tests for event recording behavior if events are enabled.
 
-## Implementation Roadmap
-
-1. **Bootstrap app**: Create Django app skeleton with settings, migrations, admin.
-2. **Data layer**: Implement `AgentSession`, `AgentSessionItem`, `AgentRun`, `AgentEvent`.
-3. **Session backend**: Write database-backed `DatabaseSession` implementing `Session` protocol.
-4. **Services**: Implement background task launcher and completion handlers.
-5. **Views & URLs**: Add submission/detail/event endpoints (HTMX + JSON).
-6. **Templates**: Ship default fragments and template tags.
-7. **Signals**: Wire lifecycle events.
-8. **Configuration**: Validate settings, document usage.
-9. **Documentation**: Provide quickstart guide and integration examples (HTMX forms, polling).
-10. **Testing & QA**: Cover asynchronous behavior, error cases, and admin UI.
-
-## Future Enhancements
-
-- **Webhook-based orchestration**: Integrate future Agents SDK features for OpenAI-driven webhooks when available.
-- **Task durability**: Optional integration with persistent job queues (Django-Q, dramatiq) for environments that require guaranteed execution after crashes.
-- **Command-line utilities**: Management commands to summarize or export runs.
-- **Analytics**: Aggregate usage metrics per agent/session and expose in admin dashboards.
-
 ## Conclusion
 
 The proposed Django package embraces the asynchronous design of the OpenAI Agents SDK, provides reusable building blocks to persist agent state, and offers a smooth developer experience—especially for HTMX-driven UIs. Implementing along these guidelines should enable teams to deploy sophisticated agent workflows on platforms like Sevalla without introducing extra worker infrastructure while preserving extensibility for future features.

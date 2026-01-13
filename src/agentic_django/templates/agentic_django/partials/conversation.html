@@ -1,0 +1,11 @@
+{% load agentic_django_tags %}
+
+<ul class="agent-conversation">
+  {% for item in items %}
+    <li class="agent-conversation__item">
+      <pre class="agent-conversation__payload">{{ item.payload|pretty_json }}</pre>
+    </li>
+  {% empty %}
+    <li class="agent-conversation__empty">No conversation history yet.</li>
+  {% endfor %}
+</ul>

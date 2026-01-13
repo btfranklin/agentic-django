@@ -1,0 +1,40 @@
+{% load agentic_django_tags %}
+
+<div
+  id="run-container-{{ run.id }}"
+  class="agent-run"
+  data-run-id="{{ run.id }}"
+  data-status="{{ run.status }}"
+  {% if run.status == "pending" or run.status == "running" %}
+    hx-get="{% url 'agents:run-fragment' run.id %}"
+    hx-trigger="load delay:1s, every 2s"
+    hx-target="#run-container-{{ run.id }}"
+    hx-swap="outerHTML"
+  {% endif %}
+>
+  {% partial "run_status" %}
+</div>
+
+{% partialdef "run_status" %}
+  {% if run.status == "pending" %}
+    <div class="agent-run__status agent-run__status--pending">
+      <span class="agent-run__spinner" aria-hidden="true"></span>
+      <span>Queued</span>
+    </div>
+  {% elif run.status == "running" %}
+    <div class="agent-run__status agent-run__status--running">
+      <span class="agent-run__spinner" aria-hidden="true"></span>
+      <span>Running</span>
+    </div>
+  {% elif run.status == "completed" %}
+    <div class="agent-run__status agent-run__status--completed">
+      <div class="agent-run__label">Completed</div>
+      <pre class="agent-run__output">{{ run.final_output|pretty_json }}</pre>
+    </div>
+  {% elif run.status == "failed" %}
+    <div class="agent-run__status agent-run__status--failed">
+      <div class="agent-run__label">Failed</div>
+      <pre class="agent-run__output">{{ run.error|default:"Unknown error" }}</pre>
+    </div>
+  {% endif %}
+{% endpartialdef %}

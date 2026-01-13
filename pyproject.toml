@@ -1,0 +1,47 @@
+[project]
+name = "agentic-django"
+version = "0.1.0"
+description = "Django integration for building agentic apps with the OpenAI Agents SDK."
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "Django>=6.0.1",
+    "django-tasks>=0.11.0",
+    "openai-agents>=0.6.5",
+    "pydantic>=2.11.0",
+]
+
+[build-system]
+requires = ["pdm-backend>=2.0.0"]
+build-backend = "pdm.backend"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-django>=4.11.1",
+    "ruff>=0.14.11",
+]
+rq = [
+    "django-tasks[rq]>=0.11.0",
+    "redis>=5.0.0",
+]
+postgres = [
+    "psycopg[binary]>=3.2.0",
+]
+
+[tool.pdm]
+distribution = true
+
+[tool.pdm.build]
+package-dir = "src"
+includes = ["src/agentic_django/**"]
+
+[tool.pdm.scripts]
+lint = "ruff check ."
+test = "pytest"
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "tests.settings"
+django_find_project = false
+pythonpath = ["."]
+python_files = ["test_*.py"]

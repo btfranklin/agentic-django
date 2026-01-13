@@ -132,7 +132,7 @@ def test_execute_run_failure_sanitized(
     assert run.error == "RuntimeError: boom"
 
 
-@pytest.mark.django_db()
+@pytest.mark.django_db(transaction=True)
 def test_dispatch_pending_runs(monkeypatch: pytest.MonkeyPatch, user: Any) -> None:
     session = AgentSession.objects.create(session_key="thread", owner=user)
     runs = [

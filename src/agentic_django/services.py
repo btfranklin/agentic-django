@@ -7,7 +7,7 @@ from typing import Any
 
 from asgiref.sync import async_to_sync, sync_to_async
 from django.conf import settings as django_settings
-from django.db import transaction
+from django.db import connection, transaction
 from django.db.models import Max
 from django.db.utils import OperationalError, ProgrammingError
 from django.utils import timezone
@@ -48,26 +48,48 @@ def dispatch_pending_runs() -> int:
     from agentic_django.tasks import run_agent_task
 
     limit = get_concurrency_limit()
+    enqueued: list[tuple[str, str]] = []
     with transaction.atomic():
         _lock_guard()
         running_count = AgentRun.objects.filter(status=AgentRun.Status.RUNNING).count()
         available = max(0, limit - running_count)
         if available == 0:
             return 0
-        pending_runs = (
-            AgentRun.objects.filter(status=AgentRun.Status.PENDING, task_id="")
-            .order_by("created_at")
-            .select_for_update()
-        )[:available]
-        enqueued = 0
+        pending_runs = AgentRun.objects.filter(
+            status=AgentRun.Status.PENDING,
+            task_id="",
+        ).order_by("created_at")
+        if connection.features.has_select_for_update_skip_locked:
+            pending_runs = pending_runs.select_for_update(skip_locked=True)
+        else:
+            pending_runs = pending_runs.select_for_update()
+        pending_runs = list(pending_runs[:available])
         for run in pending_runs:
-            task_ref = _enqueue_task(run_agent_task, str(run.id))
-            task_id = _extract_task_id(task_ref)
-            if task_id:
-                run.task_id = task_id
-                run.save(update_fields=["task_id", "updated_at"])
-            enqueued += 1
-        return enqueued
+            token = f"queued:{run.id}"
+            run.task_id = token
+            run.save(update_fields=["task_id", "updated_at"])
+            enqueued.append((str(run.id), token))
+
+        if not enqueued:
+            return 0
+
+        def _enqueue_reserved() -> None:
+            for run_id, token in enqueued:
+                task_ref = _enqueue_task(run_agent_task, run_id)
+                task_id = _extract_task_id(task_ref)
+                if task_id:
+                    AgentRun.objects.filter(id=run_id, task_id=token).update(
+                        task_id=task_id,
+                        updated_at=timezone.now(),
+                    )
+                else:
+                    AgentRun.objects.filter(id=run_id, task_id=token).update(
+                        task_id="",
+                        updated_at=timezone.now(),
+                    )
+
+        transaction.on_commit(_enqueue_reserved)
+        return len(enqueued)
 
 
 def execute_run(run_id: str) -> None:

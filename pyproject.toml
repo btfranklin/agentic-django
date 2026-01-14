@@ -2,25 +2,60 @@
 name = "agentic-django"
 version = "0.1.0"
 description = "Django integration for building agentic apps with the OpenAI Agents SDK."
-readme = "README.md"
-requires-python = ">=3.12"
+authors = [
+    {name = "B.T. Franklin", email = "brandon.franklin@gmail.com"},
+]
 dependencies = [
-    "Django>=6.0.1",
+    "Django>=6,<7",
     "django-tasks>=0.11.0",
     "openai-agents>=0.6.5",
     "pydantic>=2.11.0",
 ]
+requires-python = ">=3.12"
+readme = "README.md"
+license = {file = "LICENSE"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Framework :: Django",
+    "Typing :: Typed",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Developers",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.urls]
+Homepage = "https://github.com/btfranklin/agentic-django"
+Issues = "https://github.com/btfranklin/agentic-django/issues"
+Changelog = "https://github.com/btfranklin/agentic-django/releases"
+Repository = "https://github.com/btfranklin/agentic-django.git"
 
 [build-system]
-requires = ["pdm-backend>=2.0.0"]
+requires = ["pdm-backend"]
 build-backend = "pdm.backend"
 
-[project.optional-dependencies]
+[tool.pdm]
+distribution = true
+
+[tool.pdm.build]
+package-dir = "src"
+includes = ["src/agentic_django/**"]
+excludes = ["tests/**"]
+
+[dependency-groups]
 dev = [
     "pytest>=9.0.2",
     "pytest-django>=4.11.1",
     "ruff>=0.14.11",
 ]
+
+[project.optional-dependencies]
 rq = [
     "django-tasks[rq]>=0.11.0",
     "redis>=5.0.0",
@@ -29,19 +64,15 @@ postgres = [
     "psycopg[binary]>=3.2.0",
 ]
 
-[tool.pdm]
-distribution = true
-
-[tool.pdm.build]
-package-dir = "src"
-includes = ["src/agentic_django/**"]
-
-[tool.pdm.scripts]
-lint = "ruff check ."
-test = "pytest"
-
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "tests.settings"
 django_find_project = false
 pythonpath = ["."]
 python_files = ["test_*.py"]
+
+[tool.pdm.scripts]
+test = "pytest"
+lint = "ruff check src tests"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]

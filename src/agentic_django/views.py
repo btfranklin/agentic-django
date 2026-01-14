@@ -76,11 +76,13 @@ class AgentRunCreateView(LoginRequiredMixin, View):
         enqueue_agent_run(str(run.id))
 
         if _is_htmx(request):
-            return render(
+            response = render(
                 request,
                 "agentic_django/partials/run_fragment.html",
                 {"run": run},
             )
+            response["HX-Trigger"] = "run-update"
+            return response
         return JsonResponse({"run_id": str(run.id), "status": run.status})
 
 
@@ -101,7 +103,13 @@ class AgentRunDetailView(LoginRequiredMixin, View):
 class AgentRunFragmentView(LoginRequiredMixin, View):
     def get(self, request: HttpRequest, run_id: str) -> HttpResponse:
         run = get_object_or_404(AgentRun, id=run_id, owner=request.user)
-        return render(request, "agentic_django/partials/run_fragment.html", {"run": run})
+        response = render(
+            request,
+            "agentic_django/partials/run_fragment.html",
+            {"run": run},
+        )
+        response["HX-Trigger"] = "run-update"
+        return response
 
 
 class AgentRunEventsView(LoginRequiredMixin, View):

@@ -29,12 +29,10 @@
   {% elif run.status == "completed" %}
     <div class="agent-run__status agent-run__status--completed">
       <div class="agent-run__label">Completed</div>
-      <pre class="agent-run__output">{{ run.final_output|pretty_json }}</pre>
     </div>
   {% elif run.status == "failed" %}
     <div class="agent-run__status agent-run__status--failed">
       <div class="agent-run__label">Failed</div>
-      <pre class="agent-run__output">{{ run.error|default:"Unknown error" }}</pre>
     </div>
   {% endif %}
 {% endpartialdef %}

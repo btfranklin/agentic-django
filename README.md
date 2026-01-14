@@ -82,6 +82,46 @@ HTMX polling in a template:
 </div>
 ```
 
+## HTMX cookbook (happy path)
+
+Coordinate panels with `HX-Trigger` so you only update when there is run activity:
+
+```python
+# views.py
+response = render(request, "agentic_django/partials/run_fragment.html", {"run": run})
+response["HX-Trigger"] = "run-update"
+return response
+```
+
+```html
+<div id="conversation-panel"
+     hx-get="{% url 'agents:session-items' session.session_key %}"
+     hx-trigger="run-update from:body"
+     hx-target="#conversation-contents"
+     hx-swap="innerHTML">
+  ...
+</div>
+```
+
+Stop polling once a run finishes (to avoid pointless requests):
+
+```html
+<div
+  id="run-container-{{ run.id }}"
+  data-status="{{ run.status }}"
+  hx-get="{% url 'agents:run-fragment' run.id %}"
+  hx-trigger="load delay:1s, every 2s"
+  hx-target="#run-container-{{ run.id }}"
+  hx-swap="outerHTML"
+  hx-on::afterSwap="if (this.dataset.status === 'completed' || this.dataset.status === 'failed') { this.removeAttribute('hx-get'); this.removeAttribute('hx-trigger'); }"
+>
+  {% load agentic_django_tags %}
+  {% agent_run_fragment run %}
+</div>
+```
+
+Template override note: if you create `templates/agentic_django/...` in your project, Django will use those files instead of the package templates with the same path. This is useful for customization, but it can hide edits made in the package templates.
+
 ## Styling (optional)
 
 The package ships a minimal stylesheet for the default fragments. Include it in your base template:

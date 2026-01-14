@@ -5,6 +5,7 @@
   class="agent-run"
   data-run-id="{{ run.id }}"
   data-status="{{ run.status }}"
+  hx-on::afterSwap="if (this.dataset.status === 'completed' || this.dataset.status === 'failed') { this.removeAttribute('hx-get'); this.removeAttribute('hx-trigger'); }"
   {% if run.status == "pending" or run.status == "running" %}
     hx-get="{% url 'agents:run-fragment' run.id %}"
     hx-trigger="load delay:1s, every 2s"

@@ -207,6 +207,46 @@ def test_run_fragment_view(client: Client, user: Any) -> None:
 
 
 @pytest.mark.django_db()
+def test_run_fragment_pending_includes_polling_attrs(client: Client, user: Any) -> None:
+    client.force_login(user)
+    session = AgentSession.objects.create(session_key="thread", owner=user)
+    run = AgentRun.objects.create(
+        session=session,
+        owner=user,
+        agent_key="default",
+        status=AgentRun.Status.PENDING,
+        input_payload="hello",
+    )
+
+    response = client.get(f"/runs/{run.id}/fragment/")
+
+    assert response.status_code == 200
+    assert b"hx-get=" in response.content
+    assert b"hx-trigger=" in response.content
+    assert b"hx-on::afterSwap=" in response.content
+
+
+@pytest.mark.django_db()
+def test_run_fragment_completed_removes_polling_attrs(client: Client, user: Any) -> None:
+    client.force_login(user)
+    session = AgentSession.objects.create(session_key="thread", owner=user)
+    run = AgentRun.objects.create(
+        session=session,
+        owner=user,
+        agent_key="default",
+        status=AgentRun.Status.COMPLETED,
+        input_payload="hello",
+    )
+
+    response = client.get(f"/runs/{run.id}/fragment/")
+
+    assert response.status_code == 200
+    assert b"hx-get=" not in response.content
+    assert b"hx-trigger=" not in response.content
+    assert b"hx-on::afterSwap=" in response.content
+
+
+@pytest.mark.django_db()
 def test_session_items_view(client: Client, user: Any) -> None:
     client.force_login(user)
     session = AgentSession.objects.create(session_key="thread", owner=user)

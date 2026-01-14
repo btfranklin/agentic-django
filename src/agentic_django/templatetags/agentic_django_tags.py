@@ -26,5 +26,10 @@ def agent_conversation(session: AgentSession) -> dict[str, Any]:
 
 @register.filter
 def pretty_json(value: Any) -> str:
-    payload = json.dumps(_to_jsonable(value), indent=2, sort_keys=True, ensure_ascii=True)
+    payload = json.dumps(
+        _to_jsonable(value),
+        indent=2,
+        sort_keys=True,
+        ensure_ascii=True,
+    )
     return mark_safe(escape(payload))

@@ -22,7 +22,10 @@ class AgentSession(models.Model):
     class Meta:
         unique_together = ("owner", "session_key")
         indexes = [
-            models.Index(fields=["owner", "session_key"], name="agent_sess_owner_key_idx"),
+            models.Index(
+                fields=["owner", "session_key"],
+                name="agent_sess_owner_key_idx",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -43,7 +46,10 @@ class AgentSessionItem(models.Model):
         unique_together = ("session", "sequence")
         ordering = ["sequence"]
         indexes = [
-            models.Index(fields=["session", "sequence"], name="agent_sess_item_seq_idx"),
+            models.Index(
+                fields=["session", "sequence"],
+                name="agent_sess_item_seq_idx",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -69,7 +75,11 @@ class AgentRun(models.Model):
         related_name="agent_runs",
     )
     agent_key = models.CharField(max_length=200)
-    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
     input_payload = models.JSONField()
     final_output = models.JSONField(null=True, blank=True)
     raw_responses = models.JSONField(null=True, blank=True)
@@ -84,8 +94,14 @@ class AgentRun(models.Model):
 
     class Meta:
         indexes = [
-            models.Index(fields=["owner", "status"], name="agent_run_owner_status_idx"),
-            models.Index(fields=["status", "created_at"], name="agent_run_status_created_idx"),
+            models.Index(
+                fields=["owner", "status"],
+                name="agent_run_owner_status_idx",
+            ),
+            models.Index(
+                fields=["status", "created_at"],
+                name="agent_run_status_created_idx",
+            ),
         ]
 
     def __str__(self) -> str:

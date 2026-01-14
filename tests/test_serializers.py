@@ -6,7 +6,12 @@ from agents.items import ToolCallItem
 from agents.stream_events import AgentUpdatedStreamEvent, RunItemStreamEvent
 from pydantic import BaseModel
 
-from agentic_django.serializers import JsonSerializer, StreamEventSerializer, _to_jsonable, pretty_json
+from agentic_django.serializers import (
+    JsonSerializer,
+    StreamEventSerializer,
+    _to_jsonable,
+    pretty_json,
+)
 
 
 class ExampleModel(BaseModel):

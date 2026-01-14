@@ -50,10 +50,20 @@ def test_create_run_rejects_non_object_json(client: Client, user: Any) -> None:
 
 
 @pytest.mark.django_db()
-def test_create_run_json_success(monkeypatch: pytest.MonkeyPatch, client: Client, user: Any) -> None:
+def test_create_run_json_success(
+    monkeypatch: pytest.MonkeyPatch,
+    client: Client,
+    user: Any,
+) -> None:
     client.force_login(user)
-    monkeypatch.setattr("agentic_django.views.get_agent_registry", lambda: {"default": lambda: object()})
-    monkeypatch.setattr("agentic_django.views.enqueue_agent_run", lambda run_id: None)
+    monkeypatch.setattr(
+        "agentic_django.views.get_agent_registry",
+        lambda: {"default": lambda: object()},
+    )
+    monkeypatch.setattr(
+        "agentic_django.views.enqueue_agent_run",
+        lambda run_id: None,
+    )
 
     payload = {"session_key": "thread", "input": "hello"}
     response = client.post(
@@ -72,12 +82,20 @@ def test_create_run_uses_session_backend(
     monkeypatch: pytest.MonkeyPatch, client: Client, user: Any
 ) -> None:
     client.force_login(user)
-    monkeypatch.setattr("agentic_django.views.get_agent_registry", lambda: {"default": lambda: object()})
-    monkeypatch.setattr("agentic_django.views.enqueue_agent_run", lambda run_id: None)
+    monkeypatch.setattr(
+        "agentic_django.views.get_agent_registry",
+        lambda: {"default": lambda: object()},
+    )
+    monkeypatch.setattr(
+        "agentic_django.views.enqueue_agent_run",
+        lambda run_id: None,
+    )
     RecordingSession.called = False
 
     payload = {"session_key": "thread", "input": "hello"}
-    with override_settings(AGENTIC_DJANGO_SESSION_BACKEND="tests.support.RecordingSession"):
+    with override_settings(
+        AGENTIC_DJANGO_SESSION_BACKEND="tests.support.RecordingSession"
+    ):
         response = client.post(
             "/runs/",
             data=json.dumps(payload),
@@ -89,10 +107,20 @@ def test_create_run_uses_session_backend(
 
 
 @pytest.mark.django_db()
-def test_create_run_htmx(monkeypatch: pytest.MonkeyPatch, client: Client, user: Any) -> None:
+def test_create_run_htmx(
+    monkeypatch: pytest.MonkeyPatch,
+    client: Client,
+    user: Any,
+) -> None:
     client.force_login(user)
-    monkeypatch.setattr("agentic_django.views.get_agent_registry", lambda: {"default": lambda: object()})
-    monkeypatch.setattr("agentic_django.views.enqueue_agent_run", lambda run_id: None)
+    monkeypatch.setattr(
+        "agentic_django.views.get_agent_registry",
+        lambda: {"default": lambda: object()},
+    )
+    monkeypatch.setattr(
+        "agentic_django.views.enqueue_agent_run",
+        lambda run_id: None,
+    )
 
     payload = {"session_key": "thread", "input": "hello"}
     response = client.post(
@@ -107,7 +135,11 @@ def test_create_run_htmx(monkeypatch: pytest.MonkeyPatch, client: Client, user: 
 
 
 @pytest.mark.django_db()
-def test_create_run_unknown_agent(monkeypatch: pytest.MonkeyPatch, client: Client, user: Any) -> None:
+def test_create_run_unknown_agent(
+    monkeypatch: pytest.MonkeyPatch,
+    client: Client,
+    user: Any,
+) -> None:
     client.force_login(user)
     monkeypatch.setattr("agentic_django.views.get_agent_registry", lambda: {})
 
@@ -121,10 +153,20 @@ def test_create_run_unknown_agent(monkeypatch: pytest.MonkeyPatch, client: Clien
 
 
 @pytest.mark.django_db()
-def test_create_run_rate_limited(monkeypatch: pytest.MonkeyPatch, client: Client, user: Any) -> None:
+def test_create_run_rate_limited(
+    monkeypatch: pytest.MonkeyPatch,
+    client: Client,
+    user: Any,
+) -> None:
     client.force_login(user)
-    monkeypatch.setattr("agentic_django.views.get_agent_registry", lambda: {"default": lambda: object()})
-    monkeypatch.setattr("agentic_django.views.enqueue_agent_run", lambda run_id: None)
+    monkeypatch.setattr(
+        "agentic_django.views.get_agent_registry",
+        lambda: {"default": lambda: object()},
+    )
+    monkeypatch.setattr(
+        "agentic_django.views.enqueue_agent_run",
+        lambda run_id: None,
+    )
     cache.clear()
 
     payload = {"session_key": "thread", "input": "hello"}
@@ -160,7 +202,10 @@ def test_create_run_payload_too_large(client: Client, user: Any) -> None:
 @pytest.mark.django_db()
 def test_create_run_too_many_items(client: Client, user: Any) -> None:
     client.force_login(user)
-    payload = {"session_key": "thread", "input": [{"role": "user", "content": "hi"}] * 3}
+    payload = {
+        "session_key": "thread",
+        "input": [{"role": "user", "content": "hi"}] * 3,
+    }
     with override_settings(AGENTIC_DJANGO_MAX_INPUT_ITEMS=2):
         response = client.post(
             "/runs/",
@@ -227,7 +272,10 @@ def test_run_fragment_pending_includes_polling_attrs(client: Client, user: Any) 
 
 
 @pytest.mark.django_db()
-def test_run_fragment_completed_removes_polling_attrs(client: Client, user: Any) -> None:
+def test_run_fragment_completed_removes_polling_attrs(
+    client: Client,
+    user: Any,
+) -> None:
     client.force_login(user)
     session = AgentSession.objects.create(session_key="thread", owner=user)
     run = AgentRun.objects.create(

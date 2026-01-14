@@ -88,7 +88,11 @@ class Command(BaseCommand):
             count = self._delete_queryset(sessions, batch_size, dry_run)
             self.stdout.write(f"{prefix} {count} sessions.")
 
-    def _apply_overrides(self, policy: dict[str, Any], options: dict[str, Any]) -> dict[str, Any]:
+    def _apply_overrides(
+        self,
+        policy: dict[str, Any],
+        options: dict[str, Any],
+    ) -> dict[str, Any]:
         updated = dict(policy)
 
         for key, option_key in (

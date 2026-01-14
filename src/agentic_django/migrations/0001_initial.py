@@ -31,7 +31,10 @@ class Migration(migrations.Migration):
                 (
                     "id",
                     models.UUIDField(
-                        default=uuid.uuid4, editable=False, primary_key=True, serialize=False
+                        default=uuid.uuid4,
+                        editable=False,
+                        primary_key=True,
+                        serialize=False,
                     ),
                 ),
                 ("session_key", models.CharField(max_length=255)),
@@ -63,7 +66,10 @@ class Migration(migrations.Migration):
                 (
                     "id",
                     models.UUIDField(
-                        default=uuid.uuid4, editable=False, primary_key=True, serialize=False
+                        default=uuid.uuid4,
+                        editable=False,
+                        primary_key=True,
+                        serialize=False,
                     ),
                 ),
                 ("agent_key", models.CharField(max_length=200)),
@@ -83,7 +89,10 @@ class Migration(migrations.Migration):
                 ("input_payload", models.JSONField()),
                 ("final_output", models.JSONField(blank=True, null=True)),
                 ("raw_responses", models.JSONField(blank=True, null=True)),
-                ("last_response_id", models.CharField(blank=True, default="", max_length=200)),
+                (
+                    "last_response_id",
+                    models.CharField(blank=True, default="", max_length=200),
+                ),
                 ("error", models.TextField(blank=True, default="")),
                 ("started_at", models.DateTimeField(blank=True, null=True)),
                 ("finished_at", models.DateTimeField(blank=True, null=True)),
@@ -110,7 +119,10 @@ class Migration(migrations.Migration):
             ],
             options={
                 "indexes": [
-                    models.Index(fields=["owner", "status"], name="agent_run_owner_status_idx"),
+                    models.Index(
+                        fields=["owner", "status"],
+                        name="agent_run_owner_status_idx",
+                    ),
                     models.Index(
                         fields=["status", "created_at"],
                         name="agent_run_status_created_idx",

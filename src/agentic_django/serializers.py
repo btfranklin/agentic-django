@@ -64,7 +64,10 @@ def _to_jsonable(value: Any) -> Any:
     if isinstance(value, BaseModel):
         return value.model_dump(exclude_none=True)
     if dataclasses.is_dataclass(value):
-        return {field.name: _to_jsonable(getattr(value, field.name)) for field in dataclasses.fields(value)}
+        return {
+            field.name: _to_jsonable(getattr(value, field.name))
+            for field in dataclasses.fields(value)
+        }
     if isinstance(value, dict):
         return {str(key): _to_jsonable(item) for key, item in value.items()}
     if isinstance(value, (list, tuple, set)):

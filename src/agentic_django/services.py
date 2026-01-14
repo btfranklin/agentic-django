@@ -40,7 +40,10 @@ def enqueue_agent_run(run_id: str) -> None:
     task_ref = _enqueue_task(run_agent_task, run_id)
     task_id = _extract_task_id(task_ref)
     if task_id:
-        AgentRun.objects.filter(id=run_id).update(task_id=task_id, updated_at=timezone.now())
+        AgentRun.objects.filter(id=run_id).update(
+            task_id=task_id,
+            updated_at=timezone.now(),
+        )
 
 
 def dispatch_pending_runs() -> int:
@@ -298,19 +301,31 @@ async def _consume_stream_events(
         )
         sequence += 1
         if len(batch) >= batch_size:
-            await sync_to_async(AgentEvent.objects.bulk_create, thread_sensitive=True)(batch)
+            await sync_to_async(
+                AgentEvent.objects.bulk_create,
+                thread_sensitive=True,
+            )(batch)
             _send_event_signals(run, batch)
             batch.clear()
     if batch:
-        await sync_to_async(AgentEvent.objects.bulk_create, thread_sensitive=True)(batch)
+        await sync_to_async(
+            AgentEvent.objects.bulk_create,
+            thread_sensitive=True,
+        )(batch)
         _send_event_signals(run, batch)
 
 
-def _serialize_event(event_serializer: Any, event: StreamEvent) -> dict[str, Any] | None:
+def _serialize_event(
+    event_serializer: Any,
+    event: StreamEvent,
+) -> dict[str, Any] | None:
     try:
         return event_serializer.serialize(event)
     except Exception:  # noqa: BLE001
-        logger.exception("Failed to serialize stream event", extra={"event_type": type(event).__name__})
+        logger.exception(
+            "Failed to serialize stream event",
+            extra={"event_type": type(event).__name__},
+        )
     return None
 
 

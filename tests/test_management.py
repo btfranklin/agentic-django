@@ -72,7 +72,10 @@ def test_cleanup_command_prunes_runs(user: Any) -> None:
         input_payload="hello",
     )
     old_time = timezone.now() - timedelta(days=2)
-    AgentRun.objects.filter(id=run_old.id).update(updated_at=old_time, finished_at=old_time)
+    AgentRun.objects.filter(id=run_old.id).update(
+        updated_at=old_time,
+        finished_at=old_time,
+    )
     AgentRun.objects.filter(id=run_running.id).update(updated_at=old_time)
 
     with override_settings(AGENTIC_DJANGO_CLEANUP_POLICY={"runs_days": 1}):
@@ -87,7 +90,10 @@ def test_cleanup_command_prunes_runs(user: Any) -> None:
 def test_cleanup_command_prunes_empty_sessions(user: Any) -> None:
     session_old = AgentSession.objects.create(session_key="old", owner=user)
     session_with_item = AgentSession.objects.create(session_key="with-item", owner=user)
-    session_with_item.items.create(sequence=1, payload={"role": "user", "content": "hi"})
+    session_with_item.items.create(
+        sequence=1,
+        payload={"role": "user", "content": "hi"},
+    )
 
     old_time = timezone.now() - timedelta(days=2)
     AgentSession.objects.filter(id=session_old.id).update(updated_at=old_time)

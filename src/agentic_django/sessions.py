@@ -43,7 +43,9 @@ class DatabaseSession(SessionABC):
 
     def _get_items(self, limit: int | None) -> list[dict[str, Any]]:
         serializer = _get_item_serializer()
-        queryset = AgentSessionItem.objects.filter(session=self._session).order_by("sequence")
+        queryset = AgentSessionItem.objects.filter(
+            session=self._session
+        ).order_by("sequence")
         if limit is not None:
             queryset = queryset.order_by("-sequence")[:limit]
             items = list(reversed(list(queryset)))
@@ -107,7 +109,9 @@ def get_session(session_key: str, owner: Any) -> SessionABC:
     backend_cls = import_string(backend_path)
     get_or_create = getattr(backend_cls, "get_or_create", None)
     if not callable(get_or_create):
-        raise ValueError("Session backend must define get_or_create(session_key, owner)")
+        raise ValueError(
+            "Session backend must define get_or_create(session_key, owner)"
+        )
     return get_or_create(session_key, owner)
 
 

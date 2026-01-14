@@ -13,7 +13,9 @@ def test_get_agent_registry_returns_dict() -> None:
 
 
 def test_get_agent_registry_requires_dict() -> None:
-    with override_settings(AGENTIC_DJANGO_AGENT_REGISTRY="tests.test_registry.bad_registry"):
+    with override_settings(
+        AGENTIC_DJANGO_AGENT_REGISTRY="tests.test_registry.bad_registry"
+    ):
         with pytest.raises(ValueError):
             get_agent_registry()
 

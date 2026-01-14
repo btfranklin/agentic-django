@@ -110,7 +110,9 @@ def parse_rate_limit(value: str | None) -> tuple[int, int] | None:
         count_str, period_str = value.split("/", 1)
         count = int(count_str)
     except ValueError as exc:
-        raise ImproperlyConfigured("AGENTIC_DJANGO_RATE_LIMIT must be like '20/m'") from exc
+        raise ImproperlyConfigured(
+            "AGENTIC_DJANGO_RATE_LIMIT must be like '20/m'"
+        ) from exc
     period_map = {"s": 1, "m": 60, "h": 3600, "d": 86400}
     period_seconds = period_map.get(period_str)
     if count < 1 or period_seconds is None:
@@ -134,8 +136,9 @@ def normalize_cleanup_policy(policy: dict[str, Any] | None) -> dict[str, Any]:
     }
     unknown = set(policy.keys()) - allowed_keys
     if unknown:
+        unknown_keys = ", ".join(sorted(unknown))
         raise ImproperlyConfigured(
-            f"AGENTIC_DJANGO_CLEANUP_POLICY has unknown keys: {', '.join(sorted(unknown))}"
+            f"AGENTIC_DJANGO_CLEANUP_POLICY has unknown keys: {unknown_keys}"
         )
 
     normalized: dict[str, Any] = {}
@@ -146,7 +149,9 @@ def normalize_cleanup_policy(policy: dict[str, Any] | None) -> dict[str, Any]:
         if value is None:
             continue
         if not isinstance(value, int) or value < 1:
-            raise ImproperlyConfigured(f"AGENTIC_DJANGO_CLEANUP_POLICY.{key} must be >= 1")
+            raise ImproperlyConfigured(
+                f"AGENTIC_DJANGO_CLEANUP_POLICY.{key} must be >= 1"
+            )
         normalized[key] = value
 
     if "runs_statuses" in policy:
@@ -154,7 +159,9 @@ def normalize_cleanup_policy(policy: dict[str, Any] | None) -> dict[str, Any]:
         if statuses is None:
             pass
         elif not isinstance(statuses, (list, tuple, set)):
-            raise ImproperlyConfigured("AGENTIC_DJANGO_CLEANUP_POLICY.runs_statuses must be a list")
+            raise ImproperlyConfigured(
+                "AGENTIC_DJANGO_CLEANUP_POLICY.runs_statuses must be a list"
+            )
         else:
             normalized_statuses = [str(status) for status in statuses]
             invalid = sorted(set(normalized_statuses) - VALID_RUN_STATUSES)

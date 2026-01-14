@@ -3,7 +3,7 @@ name = "agentic-django"
 version = "0.1.0"
 description = "Django integration for building agentic apps with the OpenAI Agents SDK."
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 dependencies = [
     "Django>=6.0.1",
     "django-tasks>=0.11.0",

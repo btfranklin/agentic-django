@@ -6,6 +6,11 @@ This document captures the goals, guiding principles, and detailed design for a 
 
 The document is intended to be a hand-off reference for implementation. It enumerates the data model, asynchronous workflow, API surface, frontend integrations (particularly HTMX), and extension points required to deliver a production-ready experience.
 
+## Compatibility
+
+- Python 3.12+
+- Django 6.x
+
 ## Goals
 
 - **Drop-in Django app**: Ship as a reusable Django application (e.g., `agentic_django`) that installs via pip, provides migrations, URLs, and optional admin screens, similar to packages like `django-allauth`.

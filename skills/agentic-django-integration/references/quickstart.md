@@ -1,5 +1,10 @@
 # Agentic Django Quickstart
 
+## Requirements
+
+- Python 3.12+
+- Django 6.x
+
 ## Install and configure
 
 1. Add the app:

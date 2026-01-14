@@ -8,13 +8,13 @@
 
 ## Build, Test, and Development Commands
 - Use PDM to capture application and dev-only dependencies. Document the canonical install command (e.g., `pdm install --group dev`).
-- Target runtimes: Python 3.14+ always; use Django 6.x for Django services unless explicitly scoped otherwise.
-- Enforce version policy in `pyproject.toml`: set `requires-python = ">=3.14"` and pin Django to `>=6,<7` (or the project’s chosen minor track).
+- Target runtimes: Python 3.12+ always; use Django 6.x for Django services unless explicitly scoped otherwise.
+- Enforce version policy in `pyproject.toml`: set `requires-python = ">=3.12"` and pin Django to `>=6,<7` (or the project’s chosen minor track).
 - Expose a single test runner command (`pdm run test`) for the package.
 - Expose a lint command (`pdm run lint`) for the package.
 
 ## Coding Style & Naming Conventions
-- Use 4-space indentation, type-annotate every function, and prefer built-in generics (`list[str]`, `dict[str, Any]`) with `| None` for optionals on Python 3.14+.
+- Use 4-space indentation, type-annotate every function, and prefer built-in generics (`list[str]`, `dict[str, Any]`) with `| None` for optionals on Python 3.12+.
 - Keep Django apps modular: new views, forms, services, and tasks should live under the app that owns the corresponding data or workflow.
 - Prefer Django 6’s built-in tasks framework for background work; introduce Celery only when its operational guarantees/features are required.
 - Follow a predictable template hierarchy (`<app>/templates/<app>/**`) and colocate HTMX or partial templates alongside the features that render them.

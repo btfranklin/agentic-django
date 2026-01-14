@@ -6,6 +6,8 @@ description: Use when integrating agentic-django into a Django project, includin
 # Agentic Django Integration
 
 ## Quick start (installed app)
+Requires Python 3.12+ and Django 6.x.
+
 1. Add `"agentic_django.apps.AgenticDjangoConfig"` to `INSTALLED_APPS`.
 2. Include URLs: `path("agents/", include(("agentic_django.urls", "agents"), namespace="agents"))`.
 3. Set required settings:

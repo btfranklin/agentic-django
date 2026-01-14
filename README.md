@@ -4,6 +4,11 @@ Agentic Django is a reusable Django 6 app that wraps the OpenAI Agents SDK with
 Django-friendly primitives (sessions, runs, and background tasks). The example
 project lives in the sibling `agentic-django-example` repo.
 
+## Requirements
+
+- Python 3.12+
+- Django 6.x
+
 ## Why use it
 
 Building agentic workflows in Django usually means stitching together the OpenAI

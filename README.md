@@ -67,22 +67,24 @@ def run_status(request, run_id):
     }
 ```
 
-HTMX polling in a template:
+## HTMX
+
+HTMX polling + coordinated updates:
 
 ```html
 <div
   id="run-container-{{ run.id }}"
+  data-status="{{ run.status }}"
   hx-get="{% url 'agents:run-fragment' run.id %}"
   hx-trigger="load delay:1s, every 2s"
   hx-target="#run-container-{{ run.id }}"
   hx-swap="outerHTML"
+  hx-on::afterSwap="if (this.dataset.status === 'completed' || this.dataset.status === 'failed') { this.removeAttribute('hx-get'); this.removeAttribute('hx-trigger'); }"
 >
   {% load agentic_django_tags %}
   {% agent_run_fragment run %}
 </div>
 ```
-
-## HTMX cookbook (happy path)
 
 Coordinate panels with `HX-Trigger` so you only update when there is run activity:
 
@@ -100,23 +102,6 @@ return response
      hx-target="#conversation-contents"
      hx-swap="innerHTML">
   ...
-</div>
-```
-
-Stop polling once a run finishes (to avoid pointless requests):
-
-```html
-<div
-  id="run-container-{{ run.id }}"
-  data-status="{{ run.status }}"
-  hx-get="{% url 'agents:run-fragment' run.id %}"
-  hx-trigger="load delay:1s, every 2s"
-  hx-target="#run-container-{{ run.id }}"
-  hx-swap="outerHTML"
-  hx-on::afterSwap="if (this.dataset.status === 'completed' || this.dataset.status === 'failed') { this.removeAttribute('hx-get'); this.removeAttribute('hx-trigger'); }"
->
-  {% load agentic_django_tags %}
-  {% agent_run_fragment run %}
 </div>
 ```
 

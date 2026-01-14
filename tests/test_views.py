@@ -9,6 +9,7 @@ from django.test import override_settings
 from django.core.cache import cache
 
 from agentic_django.models import AgentEvent, AgentRun, AgentSession
+from agentic_django.views import RUN_UPDATE_TRIGGER
 from tests.support import RecordingSession
 
 
@@ -101,6 +102,7 @@ def test_create_run_htmx(monkeypatch: pytest.MonkeyPatch, client: Client, user: 
         HTTP_HX_REQUEST="true",
     )
     assert response.status_code == 200
+    assert response["HX-Trigger"] == RUN_UPDATE_TRIGGER
     assert b"run-container-" in response.content
 
 
@@ -200,6 +202,7 @@ def test_run_fragment_view(client: Client, user: Any) -> None:
     )
     response = client.get(f"/runs/{run.id}/fragment/")
     assert response.status_code == 200
+    assert response["HX-Trigger"] == RUN_UPDATE_TRIGGER
     assert b"agent-run__status" in response.content
 
 

@@ -17,6 +17,8 @@ from agentic_django.services import enqueue_agent_run
 from agentic_django.signals import agent_session_created
 from agentic_django.sessions import get_session
 
+RUN_UPDATE_TRIGGER = "run-update"
+
 
 class AgentRunCreateView(LoginRequiredMixin, View):
     def post(self, request: HttpRequest) -> HttpResponse:
@@ -81,7 +83,7 @@ class AgentRunCreateView(LoginRequiredMixin, View):
                 "agentic_django/partials/run_fragment.html",
                 {"run": run},
             )
-            response["HX-Trigger"] = "run-update"
+            response["HX-Trigger"] = RUN_UPDATE_TRIGGER
             return response
         return JsonResponse({"run_id": str(run.id), "status": run.status})
 
@@ -108,7 +110,7 @@ class AgentRunFragmentView(LoginRequiredMixin, View):
             "agentic_django/partials/run_fragment.html",
             {"run": run},
         )
-        response["HX-Trigger"] = "run-update"
+        response["HX-Trigger"] = RUN_UPDATE_TRIGGER
         return response
 
 

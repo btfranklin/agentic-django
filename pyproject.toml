@@ -1,7 +1,7 @@
 [project]
 name = "agentic-django"
 version = "0.1.0"
-description = "Django integration for building agentic apps with the OpenAI Agents SDK."
+description = "Django integration for building agentic apps with the OpenAI Agents SDK"
 authors = [
     {name = "B.T. Franklin", email = "brandon.franklin@gmail.com"},
 ]

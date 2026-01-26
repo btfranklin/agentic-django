@@ -1,5 +1,7 @@
 # Agentic Django
 
+![Agentic Django banner](https://raw.githubusercontent.com/btfranklin/agentic-django/main/.github/social%20preview/agentic_django_social_preview.jpg "Agentic Django")
+
 Agentic Django is a reusable Django 6 app that wraps the OpenAI Agents SDK with
 Django-friendly primitives (sessions, runs, and background tasks). The example
 project lives in the sibling `agentic-django-example` repo.

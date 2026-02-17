@@ -45,7 +45,6 @@ distribution = true
 
 [tool.pdm.build]
 package-dir = "src"
-includes = ["src/agentic_django/**"]
 excludes = ["tests/**"]
 
 [dependency-groups]

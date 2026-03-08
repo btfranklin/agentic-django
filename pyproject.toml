@@ -1,6 +1,6 @@
 [project]
 name = "agentic-django"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Django integration for building agentic apps with the OpenAI Agents SDK"
 authors = [
     {name = "B.T. Franklin", email = "brandon.franklin@gmail.com"},
@@ -42,6 +42,9 @@ build-backend = "pdm.backend"
 
 [tool.pdm]
 distribution = true
+
+[tool.pdm.version]
+source = "scm"
 
 [tool.pdm.build]
 package-dir = "src"

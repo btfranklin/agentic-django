@@ -171,6 +171,10 @@ Adapt the API to be friendly with HTMX progressive enhancement:
   </div>
   ```
 
+  The polling endpoint should return `HttpResponseStopPolling` once the run
+  reaches `completed` or `failed`, allowing HTMX to swap the final fragment and
+  stop polling without client-side teardown logic.
+
 - **Status Fragments**: Template `agents/partials/run_status.html` renders based on `run.status` (`pending`, `running`, `completed`, `failed`). When `completed`, it displays formatted `final_output` using project-provided template tags.
 - **Django 6 template partials (optional)**: Where it helps readability, use Django 6’s `{% partialdef %}` / `{% partial %}` to define and reuse fragments within a template, instead of proliferating small include files.
 

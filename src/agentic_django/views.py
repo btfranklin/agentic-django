@@ -4,6 +4,8 @@ import json
 from typing import Any
 
 from asgiref.sync import async_to_sync
+from django.template.loader import render_to_string
+from django_htmx.http import HttpResponseStopPolling, trigger_client_event
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.cache import cache
 from django.http import HttpRequest, HttpResponse, JsonResponse
@@ -18,6 +20,9 @@ from agentic_django.signals import agent_session_created
 from agentic_django.sessions import get_session
 
 RUN_UPDATE_TRIGGER = "run-update"
+TERMINAL_RUN_STATUSES = frozenset(
+    {AgentRun.Status.COMPLETED, AgentRun.Status.FAILED}
+)
 
 
 class AgentRunCreateView(LoginRequiredMixin, View):
@@ -78,13 +83,7 @@ class AgentRunCreateView(LoginRequiredMixin, View):
         enqueue_agent_run(str(run.id))
 
         if _is_htmx(request):
-            response = render(
-                request,
-                "agentic_django/partials/run_fragment.html",
-                {"run": run},
-            )
-            response["HX-Trigger"] = RUN_UPDATE_TRIGGER
-            return response
+            return _render_run_fragment_response(request, run)
         return JsonResponse({"run_id": str(run.id), "status": run.status})
 
 
@@ -105,13 +104,7 @@ class AgentRunDetailView(LoginRequiredMixin, View):
 class AgentRunFragmentView(LoginRequiredMixin, View):
     def get(self, request: HttpRequest, run_id: str) -> HttpResponse:
         run = get_object_or_404(AgentRun, id=run_id, owner=request.user)
-        response = render(
-            request,
-            "agentic_django/partials/run_fragment.html",
-            {"run": run},
-        )
-        response["HX-Trigger"] = RUN_UPDATE_TRIGGER
-        return response
+        return _render_run_fragment_response(request, run)
 
 
 class AgentRunEventsView(LoginRequiredMixin, View):
@@ -197,7 +190,23 @@ def _parse_json_value(value: Any) -> Any:
 
 
 def _is_htmx(request: HttpRequest) -> bool:
-    return request.headers.get("HX-Request") == "true"
+    return bool(getattr(request, "htmx", False))
+
+
+def _render_run_fragment_response(request: HttpRequest, run: AgentRun) -> HttpResponse:
+    template_name = "agentic_django/partials/run_fragment.html"
+    context = {"run": run}
+    if _is_htmx(request) and run.status in TERMINAL_RUN_STATUSES:
+        response = HttpResponseStopPolling(
+            render_to_string(template_name, context, request=request)
+        )
+    else:
+        response = render(request, template_name, context)
+    return _with_run_update_trigger(response)
+
+
+def _with_run_update_trigger(response: HttpResponse) -> HttpResponse:
+    return trigger_client_event(response, RUN_UPDATE_TRIGGER)
 
 
 def _format_time(value: Any) -> str | None:

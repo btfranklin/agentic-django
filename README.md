@@ -43,6 +43,8 @@ custom state tracking.
 Create a run from a view and enqueue it for background execution:
 
 ```python
+from django.http import JsonResponse
+
 from agentic_django.models import AgentRun, AgentSession
 from agentic_django.services import enqueue_agent_run
 
@@ -58,23 +60,53 @@ def submit_run(request):
         input_payload=request.POST["input"],
     )
     enqueue_agent_run(str(run.id))
+    return JsonResponse({"run_id": str(run.id), "status": run.status})
 ```
 
 Check run status later from a UI or API client:
 
 ```python
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
+
 from agentic_django.models import AgentRun
 
 def run_status(request, run_id):
     run = get_object_or_404(AgentRun, id=run_id, owner=request.user)
-    return {
+    return JsonResponse({
         "status": run.status,
         "final_output": run.final_output,
-    }
+    })
 ```
 
 ## HTMX
+
+If you are using the package's HTMX-oriented views and fragments, add
+`django-htmx` to your project so requests expose `request.htmx` and you can use
+the vendored script tags with Django 6 CSP nonces:
+
+```python
+INSTALLED_APPS = [
+    # ...
+    "django_htmx",
+    "agentic_django.apps.AgenticDjangoConfig",
+]
+
+MIDDLEWARE = [
+    # ...
+    "django_htmx.middleware.HtmxMiddleware",
+]
+```
+
+```html
+{% load django_htmx static %}
+<link rel="stylesheet" href="{% static 'agentic_django/agentic_django.css' %}">
+{% htmx_script %}
+{% django_htmx_script %}
+```
+
+If you are only using the JSON endpoints, you can omit `django_htmx` and its
+middleware.
 
 HTMX polling + coordinated updates:
 
@@ -86,20 +118,27 @@ HTMX polling + coordinated updates:
   hx-trigger="load delay:1s, every 2s"
   hx-target="#run-container-{{ run.id }}"
   hx-swap="outerHTML"
-  hx-on::afterSwap="if (this.dataset.status === 'completed' || this.dataset.status === 'failed') { this.removeAttribute('hx-get'); this.removeAttribute('hx-trigger'); }"
 >
   {% load agentic_django_tags %}
   {% agent_run_fragment run %}
 </div>
 ```
 
-Coordinate panels with `HX-Trigger` so you only update when there is run activity:
+The fragment endpoint returns `HttpResponseStopPolling` when a run reaches a
+terminal state, so HTMX swaps in the final HTML and stops polling without extra
+client-side teardown code.
+
+The package's fragment responses also emit `HX-Trigger: run-update` on each
+refresh so dependent panels can piggyback on the run poll loop instead of
+starting their own:
 
 ```python
-# views.py
+# Implemented in the package's fragment views.
+from django.shortcuts import render
+from django_htmx.http import trigger_client_event
+
 response = render(request, "agentic_django/partials/run_fragment.html", {"run": run})
-response["HX-Trigger"] = "run-update"
-return response
+return trigger_client_event(response, "run-update")
 ```
 
 ```html
@@ -116,7 +155,8 @@ Template override note: if you create `templates/agentic_django/...` in your pro
 
 ## Styling (optional)
 
-The package ships a minimal stylesheet for the default fragments. Include it in your base template:
+The package ships a minimal stylesheet for the default fragments. If you are not
+already including it via the HTMX setup above, add it to your base template:
 
 ```html
 {% load static %}

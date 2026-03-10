@@ -7,10 +7,15 @@ import pytest
 from django.test import Client
 from django.test import override_settings
 from django.core.cache import cache
+from django_htmx.http import HTMX_STOP_POLLING
 
 from agentic_django.models import AgentEvent, AgentRun, AgentSession
 from agentic_django.views import RUN_UPDATE_TRIGGER
 from tests.support import RecordingSession
+
+
+def _trigger_events(response: Any) -> dict[str, dict[str, Any]]:
+    return json.loads(response["HX-Trigger"])
 
 
 @pytest.mark.django_db()
@@ -130,7 +135,7 @@ def test_create_run_htmx(
         HTTP_HX_REQUEST="true",
     )
     assert response.status_code == 200
-    assert response["HX-Trigger"] == RUN_UPDATE_TRIGGER
+    assert _trigger_events(response) == {RUN_UPDATE_TRIGGER: {}}
     assert b"run-container-" in response.content
 
 
@@ -247,7 +252,7 @@ def test_run_fragment_view(client: Client, user: Any) -> None:
     )
     response = client.get(f"/runs/{run.id}/fragment/")
     assert response.status_code == 200
-    assert response["HX-Trigger"] == RUN_UPDATE_TRIGGER
+    assert _trigger_events(response) == {RUN_UPDATE_TRIGGER: {}}
     assert b"agent-run__status" in response.content
 
 
@@ -268,7 +273,7 @@ def test_run_fragment_pending_includes_polling_attrs(client: Client, user: Any) 
     assert response.status_code == 200
     assert b"hx-get=" in response.content
     assert b"hx-trigger=" in response.content
-    assert b"hx-on::afterSwap=" in response.content
+    assert b"hx-on::afterSwap=" not in response.content
 
 
 @pytest.mark.django_db()
@@ -286,12 +291,31 @@ def test_run_fragment_completed_removes_polling_attrs(
         input_payload="hello",
     )
 
+    response = client.get(f"/runs/{run.id}/fragment/", HTTP_HX_REQUEST="true")
+
+    assert response.status_code == HTMX_STOP_POLLING
+    assert b"hx-get=" not in response.content
+    assert b"hx-trigger=" not in response.content
+    assert b"hx-on::afterSwap=" not in response.content
+    assert b"Completed" in response.content
+
+
+@pytest.mark.django_db()
+def test_run_fragment_completed_non_htmx_returns_200(client: Client, user: Any) -> None:
+    client.force_login(user)
+    session = AgentSession.objects.create(session_key="thread", owner=user)
+    run = AgentRun.objects.create(
+        session=session,
+        owner=user,
+        agent_key="default",
+        status=AgentRun.Status.COMPLETED,
+        input_payload="hello",
+    )
+
     response = client.get(f"/runs/{run.id}/fragment/")
 
     assert response.status_code == 200
-    assert b"hx-get=" not in response.content
-    assert b"hx-trigger=" not in response.content
-    assert b"hx-on::afterSwap=" in response.content
+    assert b"Completed" in response.content
 
 
 @pytest.mark.django_db()

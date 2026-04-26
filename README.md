@@ -11,6 +11,13 @@ project lives in the sibling `agentic-django-example` repo.
 - Python 3.12+
 - Django 6.x
 
+## Repository docs
+
+Maintainers and coding agents should start with `docs/index.md`. The current
+architecture map lives in `docs/architecture.md`, validation guidance lives in
+`docs/quality.md`, and the embedded downstream-integration skill is documented
+in `docs/skills.md`.
+
 ## Why use it
 
 Building agentic workflows in Django usually means stitching together the OpenAI

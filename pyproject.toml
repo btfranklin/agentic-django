@@ -76,6 +76,7 @@ python_files = ["test_*.py"]
 [tool.pdm.scripts]
 test = "pytest"
 lint = "ruff check src tests"
+check = {composite = ["lint", "test"]}
 
 [tool.ruff.lint]
 select = ["E", "F", "W"]

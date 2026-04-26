@@ -1,5 +1,9 @@
 # Agentic Django Integration Design
 
+> Status: historical design record and implementation rationale. Current package
+> boundaries, runtime flow, and validation guidance live in
+> `docs/architecture.md` and `docs/quality.md`.
+
 ## Overview
 
 This document captures the goals, guiding principles, and detailed design for a reusable Django package that layers on top of the OpenAI Agents SDK. The package targets server environments such as Sevalla where the application runs under ASGI and should orchestrate long-lived agent runs without Celery-style infrastructure, leaning on Django 6’s built-in tasks framework where background execution is required.

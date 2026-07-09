@@ -32,13 +32,19 @@ first, then the full pytest suite.
   PyPI trusted publishing on release publication.
 - `.github/workflows/draft-release-notes.yml` drafts notes when version tags are
   pushed.
+- `docs/releasing.md` is the source of truth for release ordering. Push the
+  version tag first so `release-notes-scribe` can populate the draft GitHub
+  Release before publishing.
 
 ## Documentation Drift Rules
 
 - `AGENTS.md` must stay a short routing map. Move durable detail into `docs/`.
-- `docs/index.md` must link the current architecture, quality, and skill docs.
+- `docs/index.md` must link the current architecture, quality, release, and
+  skill docs.
 - `docs/architecture.md` is current truth for package boundaries and runtime
   flow.
+- `docs/releasing.md` is current truth for tag, release notes, and publishing
+  order.
 - `AGENTIC_DJANGO_DESIGN.md` is historical design rationale. If it conflicts
   with `docs/architecture.md`, update the current architecture doc and either
   amend or clearly annotate the historical note.

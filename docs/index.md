@@ -11,6 +11,7 @@ structure, implementation boundaries, and validation rules.
 | Understand the package shape | `docs/architecture.md` |
 | Change run/session/event behavior | `docs/architecture.md` and the matching tests |
 | Change validation, CI, or release behavior | `docs/quality.md` |
+| Prepare or change a release | `docs/releasing.md` |
 | Update integration guidance for downstream Django apps | `docs/skills.md` and `skills/agentic-django-integration/SKILL.md` |
 | Compare implementation to original design intent | `AGENTIC_DJANGO_DESIGN.md` |
 
@@ -21,6 +22,8 @@ structure, implementation boundaries, and validation rules.
   invariants.
 - `docs/quality.md` describes the local validation loop, CI shape, and docs
   drift policy.
+- `docs/releasing.md` describes the tag-first release process, release notes
+  drafting, and PyPI publishing trigger.
 - `docs/skills.md` describes how the embedded Codex skill and its reference
   files should stay aligned with package behavior.
 - `AGENTS.md` is only a short entry-point map.

@@ -9,6 +9,7 @@ belongs in the docs it links to.
 - User-facing package overview: `README.md`
 - Current architecture map: `docs/architecture.md`
 - Validation and maintenance rules: `docs/quality.md`
+- Release process and tag-first release notes flow: `docs/releasing.md`
 - Embedded integration skill map: `docs/skills.md`
 - Embedded integration skill entry point:
   `skills/agentic-django-integration/SKILL.md`
@@ -52,7 +53,9 @@ bounded compatibility track is required, such as `Django>=6,<7`.
 - `docs/architecture.md` is the current-truth architecture map.
 - `AGENTIC_DJANGO_DESIGN.md` is historical design rationale; do not treat it as
   the only current source.
-- Update `docs/quality.md` when validation, CI, release, or maintenance rules
+- Update `docs/quality.md` when validation, CI, or maintenance rules
+  change.
+- Update `docs/releasing.md` when tag, release notes, or publishing rules
   change.
 - Keep the embedded skill references synchronized with public README examples
   and current package behavior.

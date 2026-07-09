@@ -21,6 +21,7 @@ def test_agents_md_stays_short_and_routes_to_current_truth() -> None:
         "README.md",
         "docs/architecture.md",
         "docs/quality.md",
+        "docs/releasing.md",
         "docs/skills.md",
         "AGENTIC_DJANGO_DESIGN.md",
         "skills/agentic-django-integration/SKILL.md",
@@ -34,6 +35,7 @@ def test_docs_index_links_core_legibility_artifacts() -> None:
     for path in (
         "docs/architecture.md",
         "docs/quality.md",
+        "docs/releasing.md",
         "docs/skills.md",
         "AGENTS.md",
         "AGENTIC_DJANGO_DESIGN.md",
@@ -47,6 +49,28 @@ def test_design_doc_is_marked_as_historical() -> None:
     assert "historical design record" in design_doc
     assert "docs/architecture.md" in design_doc
     assert "docs/quality.md" in design_doc
+
+
+def test_release_guidance_captures_tag_first_release_notes_flow() -> None:
+    release_guidance = read_text("docs/releasing.md")
+
+    required_fragments = [
+        "release-notes-scribe",
+        "Draft Release Notes",
+        "git tag",
+        "git push origin",
+        ".github/workflows/draft-release-notes.yml",
+        ".github/workflows/python-publish.yml",
+        "PyPI",
+    ]
+    missing_fragments = [
+        fragment for fragment in required_fragments if fragment not in release_guidance
+    ]
+
+    assert not missing_fragments, (
+        "Release guidance must preserve the tag-first release notes process. "
+        f"Missing: {missing_fragments}"
+    )
 
 
 def test_pyproject_exposes_canonical_validation_scripts() -> None:

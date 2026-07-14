@@ -8,25 +8,26 @@ structure, implementation boundaries, and validation rules.
 
 | Task | Read |
 | --- | --- |
-| Understand the package shape | `docs/architecture.md` |
-| Change run/session/event behavior | `docs/architecture.md` and the matching tests |
-| Change validation, CI, or release behavior | `docs/quality.md` |
-| Prepare or change a release | `docs/releasing.md` |
-| Update integration guidance for downstream Django apps | `docs/skills.md` and `skills/agentic-django-integration/SKILL.md` |
-| Compare implementation to original design intent | `AGENTIC_DJANGO_DESIGN.md` |
+| Understand the package shape | [Architecture](architecture.md) |
+| Change run/session/event behavior | [Architecture](architecture.md) and the matching tests |
+| Change validation, CI, or release behavior | [Quality and validation](quality.md) |
+| Prepare or change a release | [Releasing](releasing.md) |
+| Update integration guidance for downstream Django apps | [Skill map](skills.md) and [integration skill](../skills/agentic-django-integration/SKILL.md) |
+| Compare implementation to original design intent | [Historical design record](../AGENTIC_DJANGO_DESIGN.md) |
 
 ## Current Sources Of Truth
 
-- `docs/architecture.md` describes the implemented package architecture,
+- [Architecture](architecture.md) describes the implemented package
+  architecture,
   dependency directions, runtime flow, extension points, and security
   invariants.
-- `docs/quality.md` describes the local validation loop, CI shape, and docs
-  drift policy.
-- `docs/releasing.md` describes the tag-first release process, release notes
+- [Quality and validation](quality.md) describes the local validation loop, CI
+  shape, and docs drift policy.
+- [Releasing](releasing.md) describes the tag-first release process, release notes
   drafting, and PyPI publishing trigger.
-- `docs/skills.md` describes how the embedded Codex skill and its reference
+- [Skill map](skills.md) describes how the embedded Codex skill and its reference
   files should stay aligned with package behavior.
-- `AGENTS.md` is only a short entry-point map.
+- [AGENTS.md](../AGENTS.md) is only a short entry-point map.
 
 ## Maintenance Rule
 

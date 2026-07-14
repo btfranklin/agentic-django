@@ -2,7 +2,8 @@
 
 > Status: historical design record and implementation rationale. Current package
 > boundaries, runtime flow, and validation guidance live in
-> `docs/architecture.md` and `docs/quality.md`.
+> [docs/architecture.md](docs/architecture.md) and
+> [docs/quality.md](docs/quality.md).
 
 ## Overview
 

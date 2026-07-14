@@ -33,11 +33,14 @@ git push origin v0.2.1
 
 ## Workflow Boundaries
 
-- `.github/workflows/create-draft-release.yml` runs on pushed `v*.*.*` tags and
-  drafts release notes with `btfranklin/release-notes-scribe`.
-- `.github/workflows/python-publish.yml` runs when a GitHub Release is
-  published, builds with PDM, and publishes to PyPI through trusted publishing.
-- Versioning is SCM-derived through the PDM configuration in `pyproject.toml`.
+- [Draft release workflow](../.github/workflows/create-draft-release.yml) runs on
+  pushed `v*.*.*` tags and drafts release notes with
+  `btfranklin/release-notes-scribe`.
+- [Python publishing workflow](../.github/workflows/python-publish.yml) runs when
+  a GitHub Release is published, builds with PDM, and publishes to PyPI through
+  trusted publishing.
+- Versioning is SCM-derived through the PDM configuration in
+  [pyproject.toml](../pyproject.toml).
 
 Do not publish the GitHub Release before the tag-triggered release-notes workflow
 has populated the draft. The PyPI publishing workflow does not generate release

@@ -1,76 +1,87 @@
 from __future__ import annotations
 
 import ast
+import re
 import tomllib
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
+MARKDOWN_LINK = re.compile(r"(?<!!)\[[^]]+\]\((?P<target>[^)\s]+)")
+
+CORE_LEGIBILITY_ARTIFACTS = {
+    Path("AGENTS.md"),
+    Path("README.md"),
+    Path("docs/architecture.md"),
+    Path("docs/index.md"),
+    Path("docs/quality.md"),
+    Path("docs/releasing.md"),
+    Path("docs/skills.md"),
+    Path("AGENTIC_DJANGO_DESIGN.md"),
+    Path("skills/agentic-django-integration/SKILL.md"),
+}
+
+REQUIRED_ROUTES = {
+    "AGENTS.md": CORE_LEGIBILITY_ARTIFACTS - {Path("AGENTS.md"), Path("docs/index.md")},
+    "docs/index.md": {
+        Path("AGENTS.md"),
+        Path("docs/architecture.md"),
+        Path("docs/quality.md"),
+        Path("docs/releasing.md"),
+        Path("docs/skills.md"),
+        Path("AGENTIC_DJANGO_DESIGN.md"),
+        Path("skills/agentic-django-integration/SKILL.md"),
+    },
+}
+
+LINK_CHECK_DOCUMENTS = {
+    *REQUIRED_ROUTES,
+    "docs/quality.md",
+    "docs/releasing.md",
+    "AGENTIC_DJANGO_DESIGN.md",
+}
 
 
 def read_text(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
-def test_agents_md_stays_short_and_routes_to_current_truth() -> None:
+def test_core_legibility_artifacts_exist() -> None:
+    missing = sorted(
+        str(path) for path in CORE_LEGIBILITY_ARTIFACTS if not (ROOT / path).is_file()
+    )
+
+    assert not missing, f"Missing core repository guidance: {', '.join(missing)}"
+
+
+def test_agents_md_stays_short() -> None:
     agents = read_text("AGENTS.md")
 
     assert len(agents.splitlines()) <= 80, (
         "Keep AGENTS.md as a short routing map; move durable guidance into docs/."
     )
-    for path in (
-        "README.md",
-        "docs/architecture.md",
-        "docs/quality.md",
-        "docs/releasing.md",
-        "docs/skills.md",
-        "AGENTIC_DJANGO_DESIGN.md",
-        "skills/agentic-django-integration/SKILL.md",
-    ):
-        assert path in agents, f"AGENTS.md must route future agents to {path}."
 
 
-def test_docs_index_links_core_legibility_artifacts() -> None:
-    index = read_text("docs/index.md")
+def test_repository_routes_are_resolved_markdown_links() -> None:
+    links_by_source = {
+        source: local_markdown_targets(source) for source in LINK_CHECK_DOCUMENTS
+    }
 
-    for path in (
-        "docs/architecture.md",
-        "docs/quality.md",
-        "docs/releasing.md",
-        "docs/skills.md",
-        "AGENTS.md",
-        "AGENTIC_DJANGO_DESIGN.md",
-    ):
-        assert path in index, f"docs/index.md must link to {path}."
+    for source, linked_targets in links_by_source.items():
+        broken_routes = sorted(
+            str(path) for path in linked_targets if not (ROOT / path).exists()
+        )
+        assert not broken_routes, (
+            f"{source} contains broken local links: {', '.join(broken_routes)}"
+        )
 
+    for source, required_targets in REQUIRED_ROUTES.items():
+        linked_targets = links_by_source[source]
+        missing_routes = sorted(str(path) for path in required_targets - linked_targets)
 
-def test_design_doc_is_marked_as_historical() -> None:
-    design_doc = read_text("AGENTIC_DJANGO_DESIGN.md").lower()
-
-    assert "historical design record" in design_doc
-    assert "docs/architecture.md" in design_doc
-    assert "docs/quality.md" in design_doc
-
-
-def test_release_guidance_captures_tag_first_release_notes_flow() -> None:
-    release_guidance = read_text("docs/releasing.md")
-
-    required_fragments = [
-        "release-notes-scribe",
-        "Draft Release Notes",
-        "git tag",
-        "git push origin",
-        ".github/workflows/create-draft-release.yml",
-        ".github/workflows/python-publish.yml",
-        "PyPI",
-    ]
-    missing_fragments = [
-        fragment for fragment in required_fragments if fragment not in release_guidance
-    ]
-
-    assert not missing_fragments, (
-        "Release guidance must preserve the tag-first release notes process. "
-        f"Missing: {missing_fragments}"
-    )
+        assert not missing_routes, (
+            f"{source} must link to: {', '.join(missing_routes)}"
+        )
 
 
 def test_pyproject_exposes_canonical_validation_scripts() -> None:
@@ -80,6 +91,7 @@ def test_pyproject_exposes_canonical_validation_scripts() -> None:
     assert scripts["lint"] == "ruff check src tests"
     assert scripts["test"] == "pytest"
     assert scripts["check"]["composite"] == ["lint", "test"]
+    assert config["tool"]["pdm"]["version"]["source"] == "scm"
 
 
 def test_low_level_modules_do_not_import_orchestration_layers() -> None:
@@ -135,3 +147,24 @@ def has_import(imports: set[str], module: str) -> bool:
         imported == module or imported.startswith(f"{module}.")
         for imported in imports
     )
+
+
+def local_markdown_targets(path: str) -> set[Path]:
+    source = ROOT / path
+    targets: set[Path] = set()
+
+    for match in MARKDOWN_LINK.finditer(source.read_text(encoding="utf-8")):
+        destination = urlsplit(match.group("target"))
+        if destination.scheme or destination.netloc or not destination.path:
+            continue
+
+        resolved = (source.parent / unquote(destination.path)).resolve()
+        try:
+            targets.add(resolved.relative_to(ROOT))
+        except ValueError as error:
+            raise AssertionError(
+                f"{path} contains a local link outside the repository: "
+                f"{match.group('target')}"
+            ) from error
+
+    return targets

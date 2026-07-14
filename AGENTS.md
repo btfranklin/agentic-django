@@ -6,16 +6,18 @@ belongs in the docs it links to.
 
 ## Start Here
 
-- User-facing package overview: `README.md`
-- Current architecture map: `docs/architecture.md`
-- Validation and maintenance rules: `docs/quality.md`
-- Release process and tag-first release notes flow: `docs/releasing.md`
-- Embedded integration skill map: `docs/skills.md`
+- User-facing package overview: [README.md](README.md)
+- Current architecture map: [docs/architecture.md](docs/architecture.md)
+- Validation and maintenance rules: [docs/quality.md](docs/quality.md)
+- Release process and tag-first release notes flow:
+  [docs/releasing.md](docs/releasing.md)
+- Embedded integration skill map: [docs/skills.md](docs/skills.md)
 - Embedded integration skill entry point:
-  `skills/agentic-django-integration/SKILL.md`
-- Historical design rationale: `AGENTIC_DJANGO_DESIGN.md`
-- Package code: `src/agentic_django/`
-- Tests: `tests/`
+  [skills/agentic-django-integration/SKILL.md](skills/agentic-django-integration/SKILL.md)
+- Historical design rationale:
+  [AGENTIC_DJANGO_DESIGN.md](AGENTIC_DJANGO_DESIGN.md)
+- Package code: [src/agentic_django/](src/agentic_django/)
+- Tests: [tests/](tests/)
 
 ## Commands
 

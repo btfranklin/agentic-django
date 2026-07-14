@@ -30,7 +30,7 @@ first, then the full pytest suite.
   3.13, and 3.14.
 - `.github/workflows/python-publish.yml` builds with PDM and publishes through
   PyPI trusted publishing on release publication.
-- `.github/workflows/draft-release-notes.yml` drafts notes when version tags are
+- `.github/workflows/create-draft-release.yml` drafts notes when version tags are
   pushed.
 - `docs/releasing.md` is the source of truth for release ordering. Push the
   version tag first so `release-notes-scribe` can populate the draft GitHub

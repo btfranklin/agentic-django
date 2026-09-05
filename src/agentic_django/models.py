@@ -93,6 +93,13 @@ class AgentRun(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["session"],
+                condition=models.Q(status="running"),
+                name="agent_run_one_running_session",
+            ),
+        ]
         indexes = [
             models.Index(
                 fields=["owner", "status"],

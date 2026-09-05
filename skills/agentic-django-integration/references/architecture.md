@@ -20,7 +20,9 @@ Only semantic events are stored; raw response token events are skipped.
 
 Pending runs are dispatched up to `AGENTIC_DJANGO_CONCURRENCY_LIMIT`.
 Dispatch uses database locking to avoid race conditions and then enqueues tasks
-after commit to keep transactions short.
+after commit to keep transactions short. Only one run per session executes at a
+time, so each new turn reads the previous completed turn. Different sessions can
+execute concurrently.
 
 ## Run recovery
 

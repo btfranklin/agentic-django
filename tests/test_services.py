@@ -220,3 +220,54 @@ def test_dispatch_preserves_another_workers_active_run(
     assert active.status == AgentRun.Status.RUNNING
     assert active.task_id == "active-worker"
     assert dispatched == []
+
+
+@pytest.mark.django_db(transaction=True)
+def test_session_reservation_blocks_overlap_but_allows_other_sessions(
+    user: Any,
+) -> None:
+    from agentic_django.services import _reserve_run_slot
+
+    session = AgentSession.objects.create(session_key="conversation", owner=user)
+    other = AgentSession.objects.create(session_key="other", owner=user)
+    first, second, independent = [
+        AgentRun.objects.create(
+            session=target, owner=user, agent_key="default", input_payload="hello"
+        )
+        for target in (session, session, other)
+    ]
+    with override_settings(AGENTIC_DJANGO_CONCURRENCY_LIMIT=3):
+        assert _reserve_run_slot(first)
+        assert not _reserve_run_slot(second)
+        assert _reserve_run_slot(independent)
+        first.mark_completed()
+        assert _reserve_run_slot(second)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_dispatch_selects_distinct_idle_sessions(
+    monkeypatch: pytest.MonkeyPatch, user: Any
+) -> None:
+    active = AgentSession.objects.create(session_key="active", owner=user)
+    idle = AgentSession.objects.create(session_key="idle", owner=user)
+    other = AgentSession.objects.create(session_key="other", owner=user)
+    AgentRun.objects.create(
+        session=active, owner=user, agent_key="default", input_payload="hi",
+        status=AgentRun.Status.RUNNING,
+    )
+    pending = [
+        AgentRun.objects.create(
+            session=target, owner=user, agent_key="default", input_payload="hi"
+        )
+        for target in (active, idle, idle, other)
+    ]
+    sent = []
+
+    def enqueue(task: Any, run_id: str) -> DummyTask:
+        sent.append(run_id)
+        return DummyTask(run_id)
+
+    monkeypatch.setattr("agentic_django.services._enqueue_task", enqueue)
+    with override_settings(AGENTIC_DJANGO_CONCURRENCY_LIMIT=3):
+        assert dispatch_pending_runs() == 2
+    assert sent == [str(pending[1].id), str(pending[3].id)]

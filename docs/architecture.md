@@ -27,7 +27,7 @@ JSON and HTMX polling endpoints.
    create the session, creates an `AgentRun`, and enqueues it.
 2. `enqueue_agent_run` schedules `run_agent_task` through the configured
    Django-tasks backend and stores a task id when one is available.
-3. `execute_run` reserves a concurrency slot, sends `agent_run_started`, builds
+3. `execute_run` reserves a global concurrency slot and exclusive session access, sends `agent_run_started`, builds
    the agent/session/context/run options, and calls the Agents SDK runner.
 4. If events are disabled, `Runner.run` is executed through `async_to_sync`.
    If events are enabled, `Runner.run_streamed` is used and semantic
@@ -86,6 +86,18 @@ test for the behavior that made the edge necessary.
   `agent_run_completed`, `agent_run_failed`, and `agent_run_event`.
 - Template overrides: downstream projects may override
   `templates/agentic_django/...` paths.
+
+## Session execution
+
+Only one run per session can have `running` status. Dispatch and execution check
+this rule under the dispatch lock. A write to the lock row starts the transaction
+before any run reads, which also serializes SQLite workers. A database constraint
+also enforces the session rule.
+The reservation covers history reads and writes for the complete run. Database
+transactions end before the model call. Other sessions can run concurrently.
+
+Stop workers and recover existing running rows before applying the session
+constraint migration if a session has more than one running row.
 
 ## Recovery
 

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import traceback
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 from asgiref.sync import async_to_sync, sync_to_async
@@ -46,8 +48,7 @@ def dispatch_pending_runs() -> int:
 
     limit = get_concurrency_limit()
     enqueued: list[tuple[str, str]] = []
-    with transaction.atomic():
-        _lock_guard()
+    with _dispatch_lock():
         running_count = AgentRun.objects.filter(status=AgentRun.Status.RUNNING).count()
         available = max(0, limit - running_count)
         if available == 0:
@@ -60,12 +61,20 @@ def dispatch_pending_runs() -> int:
             pending_runs = pending_runs.select_for_update(skip_locked=True)
         else:
             pending_runs = pending_runs.select_for_update()
-        pending_runs = list(pending_runs[:available])
+        active_sessions = set(
+            AgentRun.objects.filter(status=AgentRun.Status.RUNNING)
+            .values_list("session_id", flat=True)
+        )
         for run in pending_runs:
+            if run.session_id in active_sessions:
+                continue
+            active_sessions.add(run.session_id)
             token = f"queued:{run.id}"
             run.task_id = token
             run.save(update_fields=["task_id", "updated_at"])
             enqueued.append((str(run.id), token))
+            if len(enqueued) == available:
+                break
 
         if not enqueued:
             return 0
@@ -94,7 +103,9 @@ def execute_run(run_id: str) -> None:
     if run.status != AgentRun.Status.PENDING:
         return
     if not _reserve_run_slot(run):
-        AgentRun.objects.filter(id=run_id).update(task_id="", updated_at=timezone.now())
+        AgentRun.objects.filter(id=run_id, status=AgentRun.Status.PENDING).update(
+            task_id="", updated_at=timezone.now()
+        )
         return
 
     agent_run_started.send(sender=AgentRun, run=run)
@@ -165,10 +176,13 @@ def execute_run(run_id: str) -> None:
 
 def _reserve_run_slot(run: AgentRun) -> bool:
     limit = get_concurrency_limit()
-    with transaction.atomic():
-        _lock_guard()
+    with _dispatch_lock():
         running_count = AgentRun.objects.filter(status=AgentRun.Status.RUNNING).count()
         if running_count >= limit:
+            return False
+        if AgentRun.objects.filter(
+            session_id=run.session_id, status=AgentRun.Status.RUNNING
+        ).exists():
             return False
         run.refresh_from_db(fields=["status"])
         if run.status != AgentRun.Status.PENDING:
@@ -179,9 +193,13 @@ def _reserve_run_slot(run: AgentRun) -> bool:
     return True
 
 
-def _lock_guard() -> AgentRunLock:
-    guard, _ = AgentRunLock.objects.select_for_update().get_or_create(key="global")
-    return guard
+@contextmanager
+def _dispatch_lock() -> Iterator[None]:
+    AgentRunLock.objects.get_or_create(key="global")
+    with transaction.atomic():
+        # Write before reading run state to acquire the SQLite write lock too.
+        AgentRunLock.objects.filter(key="global").update(updated_at=timezone.now())
+        yield
 
 
 def _build_run_options(run: AgentRun) -> dict[str, Any]:
@@ -352,8 +370,7 @@ def _send_event_signals(run: AgentRun, events: list[AgentEvent]) -> None:
 def recover_stuck_runs(mode: str) -> int:
     if mode not in {"fail", "requeue"}:
         return 0
-    with transaction.atomic():
-        _lock_guard()
+    with _dispatch_lock():
         queryset = AgentRun.objects.filter(status=AgentRun.Status.RUNNING)
         if mode == "fail":
             updated = queryset.update(

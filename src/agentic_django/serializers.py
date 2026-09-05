@@ -62,7 +62,7 @@ def pretty_json(value: Any) -> str:
 
 def _to_jsonable(value: Any) -> Any:
     if isinstance(value, BaseModel):
-        return value.model_dump(exclude_none=True)
+        return value.model_dump(mode="json", exclude_none=True)
     if dataclasses.is_dataclass(value):
         return {
             field.name: _to_jsonable(getattr(value, field.name))
@@ -75,7 +75,7 @@ def _to_jsonable(value: Any) -> Any:
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     if hasattr(value, "model_dump"):
-        return value.model_dump()
+        return _to_jsonable(value.model_dump())
     return str(value)
 
 

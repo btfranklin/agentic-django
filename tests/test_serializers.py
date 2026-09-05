@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
+from typing import Any
 from agents import Agent
 from agents.items import ToolCallItem
 from agents.stream_events import AgentUpdatedStreamEvent, RunItemStreamEvent
@@ -33,6 +35,17 @@ def test_to_jsonable_handles_dataclass() -> None:
 def test_to_jsonable_handles_pydantic() -> None:
     payload = _to_jsonable(ExampleModel(name="hi"))
     assert payload == {"name": "hi"}
+
+
+def test_to_jsonable_normalizes_model_dump_fallback() -> None:
+    class CustomModel:
+        def model_dump(self) -> dict[str, Any]:
+            return {"day": date(2026, 9, 5), "nested": ExampleModel(name="hi")}
+
+    assert _to_jsonable(CustomModel()) == {
+        "day": "2026-09-05",
+        "nested": {"name": "hi"},
+    }
 
 
 def test_serializer_round_trip() -> None:

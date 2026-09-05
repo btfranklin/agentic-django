@@ -298,36 +298,25 @@ async def _consume_stream_events(
     result: Any,
     event_serializer: Any,
     starting_sequence: int,
-    batch_size: int = 50,
 ) -> None:
     sequence = starting_sequence
-    batch: list[AgentEvent] = []
     async for event in result.stream_events():
         payload = _serialize_event(event_serializer, event)
         if payload is None:
             continue
-        batch.append(
-            AgentEvent(
-                run=run,
-                sequence=sequence,
-                event_type=_event_type(event),
-                payload=payload,
-            )
+        stored_event = AgentEvent(
+            run=run,
+            sequence=sequence,
+            event_type=_event_type(event),
+            payload=payload,
         )
+        await sync_to_async(_persist_event, thread_sensitive=True)(run, stored_event)
         sequence += 1
-        if len(batch) >= batch_size:
-            await sync_to_async(
-                AgentEvent.objects.bulk_create,
-                thread_sensitive=True,
-            )(batch)
-            _send_event_signals(run, batch)
-            batch.clear()
-    if batch:
-        await sync_to_async(
-            AgentEvent.objects.bulk_create,
-            thread_sensitive=True,
-        )(batch)
-        _send_event_signals(run, batch)
+
+
+def _persist_event(run: AgentRun, event: AgentEvent) -> None:
+    event.save()
+    _send_event_signals(run, [event])
 
 
 def _serialize_event(

@@ -374,3 +374,42 @@ def test_run_events_view(client: Client, user: Any) -> None:
     data = response.json()
     assert data["run_id"] == str(run.id)
     assert data["events"][0]["sequence"] == 2
+
+
+@pytest.mark.django_db()
+@pytest.mark.parametrize("text", ["123", "true", "null", '"quoted"', '["text"]'])
+@pytest.mark.parametrize("as_json", [False, True])
+def test_create_run_preserves_input_text(
+    monkeypatch: pytest.MonkeyPatch, client: Client, user: Any,
+    text: str, as_json: bool,
+) -> None:
+    client.force_login(user)
+    monkeypatch.setattr(
+        "agentic_django.views.enqueue_agent_run", lambda run_id: None,
+    )
+    payload = {"session_key": "thread", "input": text}
+    if as_json:
+        response = client.post(
+            "/runs/", data=json.dumps(payload), content_type="application/json",
+        )
+    else:
+        response = client.post("/runs/", data=payload)
+    assert response.status_code == 200
+    assert AgentRun.objects.get(id=response.json()["run_id"]).input_payload == text
+
+
+@pytest.mark.django_db()
+def test_create_run_preserves_json_context_text(
+    monkeypatch: pytest.MonkeyPatch, client: Client, user: Any,
+) -> None:
+    client.force_login(user)
+    monkeypatch.setattr(
+        "agentic_django.views.enqueue_agent_run", lambda run_id: None,
+    )
+    payload = {"session_key": "thread", "input": "hello", "context": "123"}
+    response = client.post(
+        "/runs/", data=json.dumps(payload), content_type="application/json",
+    )
+    assert response.status_code == 200
+    run = AgentRun.objects.get(id=response.json()["run_id"])
+    assert run.metadata["context"] == "123"

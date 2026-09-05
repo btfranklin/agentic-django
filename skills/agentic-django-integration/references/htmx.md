@@ -2,6 +2,11 @@
 
 ## Submission form
 
+The `input` form field is plain text. Text that resembles JSON stays unchanged.
+To submit structured input items, send an `application/json` request with an
+`input` array. JSON request fields are decoded once. The `config` and `context`
+form fields can contain JSON.
+
 ```html
 <form
   hx-post="/agents/runs/"

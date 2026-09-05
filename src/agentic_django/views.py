@@ -38,7 +38,7 @@ class AgentRunCreateView(LoginRequiredMixin, View):
         if not session_key:
             return JsonResponse({"error": "session_key is required"}, status=400)
 
-        input_payload = _parse_json_value(payload.get("input"))
+        input_payload = payload.get("input")
         if input_payload in (None, ""):
             return JsonResponse({"error": "input is required"}, status=400)
         if not isinstance(input_payload, (str, list)):
@@ -64,10 +64,10 @@ class AgentRunCreateView(LoginRequiredMixin, View):
             agent_session_created.send(sender=AgentSession, session=session)
 
         metadata: dict[str, Any] = {}
-        config_payload = _parse_json_value(payload.get("config"))
+        config_payload = payload.get("config")
         if isinstance(config_payload, dict):
             metadata["run_options"] = config_payload
-        context_payload = _parse_json_value(payload.get("context"))
+        context_payload = payload.get("context")
         if context_payload is not None:
             metadata["context"] = context_payload
 
@@ -177,7 +177,11 @@ def _parse_payload(request: HttpRequest) -> dict[str, Any]:
         if not isinstance(payload, dict):
             raise ValueError("JSON payload must be an object")
         return payload
-    return request.POST.dict()
+    payload = request.POST.dict()
+    for field in ("config", "context"):
+        if field in payload:
+            payload[field] = _parse_json_value(payload[field])
+    return payload
 
 
 def _parse_json_value(value: Any) -> Any:

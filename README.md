@@ -11,6 +11,102 @@ project lives in the sibling `agentic-django-example` repo.
 - Python 3.12+
 - Django 6.x
 
+## Quickstart
+
+Start with an existing Django project that has authentication and session
+middleware configured. Replace `my_project` below with your project package name.
+
+### 1. Install the package
+
+```bash
+pdm add agentic-django
+```
+
+For the default OpenAI provider, set `OPENAI_API_KEY` in the environment used by
+your Django process. The package does not load `.env` files itself.
+
+### 2. Define the agent registry
+
+Create `my_project/agent_registry.py`:
+
+```python
+from collections.abc import Callable
+
+from agents import Agent
+
+
+def build_default() -> Agent:
+    return Agent(name="Support Agent")
+
+
+def get_agent_registry() -> dict[str, Callable[[], Agent]]:
+    return {"default": build_default}
+```
+
+This minimal agent uses the SDK's default model. Add your agent instructions,
+model, and tools in `build_default` when you extend the integration.
+
+### 3. Configure the app and local execution
+
+Add these entries to `settings.py`:
+
+```python
+INSTALLED_APPS = [
+    # Keep your existing apps.
+    "agentic_django.apps.AgenticDjangoConfig",
+]
+
+AGENTIC_DJANGO_AGENT_REGISTRY = "my_project.agent_registry.get_agent_registry"
+AGENTIC_DJANGO_DEFAULT_AGENT_KEY = "default"
+
+TASKS = {
+    "default": {
+        "BACKEND": "django_tasks.backends.immediate.ImmediateBackend",
+    }
+}
+```
+
+The immediate backend runs the agent during the request. It needs no worker and
+is useful for a first local run. Use a background task backend for production.
+
+### 4. Add the URLs and run migrations
+
+Add the package URLs to your project's `urls.py`:
+
+```python
+from django.urls import include, path
+
+urlpatterns = [
+    # Keep your existing URL patterns.
+    path("agents/", include("agentic_django.urls", namespace="agents")),
+]
+```
+
+```bash
+pdm run python manage.py migrate
+pdm run python manage.py runserver
+```
+
+### 5. Submit a run and read its result
+
+From an authenticated client, send a JSON request to `POST /agents/runs/`.
+Include the session cookie and a valid CSRF token, as required by your project.
+
+```json
+{
+  "session_key": "first-conversation",
+  "input": "Hello"
+}
+```
+
+The response contains a `run_id`. Request `GET /agents/runs/<run_id>/` to read
+its `status` and `final_output`. With a background backend, repeat that request
+until the status is `completed` or `failed`.
+
+The JSON endpoints need no HTMX setup. Continue with [HTMX](#htmx) for HTML
+polling, [optional configuration](#optional-configuration) for background tasks
+and limits, or [usage examples](#usage-examples) for custom views.
+
 ## Repository docs
 
 Maintainers and coding agents should start with `docs/index.md`. The current
@@ -63,7 +159,7 @@ def submit_run(request):
     run = AgentRun.objects.create(
         session=session,
         owner=request.user,
-        agent_key="demo",
+        agent_key="default",
         input_payload=request.POST["input"],
     )
     enqueue_agent_run(str(run.id))
@@ -170,27 +266,14 @@ already including it via the HTMX setup above, add it to your base template:
 <link rel="stylesheet" href="{% static 'agentic_django/agentic_django.css' %}">
 ```
 
-## Configuration
+## Optional configuration
 
-Add the app and configure the agent registry in `settings.py`:
+After the quickstart works, configure run limits and a background backend in
+`settings.py` as needed. An RQ backend also needs Redis and a running RQ worker.
 
 ```python
-INSTALLED_APPS = [
-    # ...
-    "agentic_django.apps.AgenticDjangoConfig",
-]
-
-AGENTIC_DJANGO_AGENT_REGISTRY = "my_project.agent_registry.get_agent_registry"
-AGENTIC_DJANGO_DEFAULT_AGENT_KEY = "default"
 AGENTIC_DJANGO_DEFAULT_RUN_OPTIONS = {"max_turns": 6}
 AGENTIC_DJANGO_CONCURRENCY_LIMIT = None  # auto: CPU count
-
-# django-tasks backend selection (Immediate by default, RQ in production)
-TASKS = {
-    "default": {
-        "BACKEND": "django_tasks.backends.immediate.ImmediateBackend",
-    }
-}
 
 RQ_QUEUES = {
     "default": {
@@ -239,23 +322,6 @@ GET /runs/<uuid:run_id>/events/?after=<sequence>&limit=<n>
 
 You can also subscribe to the Django signal `agent_run_event` to push UI updates
 after each event is stored.
-
-Provide a registry that returns agent factories:
-
-```python
-from agents import Agent
-from my_project.models import MyModelProvider
-
-def get_agent_registry():
-    def build_default():
-        return Agent(
-            name="Support Agent",
-            instructions="Help the user with account issues.",
-            model=MyModelProvider(),
-        )
-
-    return {"default": build_default}
-```
 
 ## Operations
 

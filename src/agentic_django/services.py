@@ -49,7 +49,7 @@ def _enqueue_reserved_runs(reservations: list[tuple[str, str]]) -> None:
 
     for index, (run_id, token) in enumerate(reservations):
         try:
-            task_ref = _enqueue_task(run_agent_task, run_id)
+            task_result = run_agent_task.enqueue(run_id)
         except Exception:
             # Release only reservations that this callback still owns.
             for pending_id, pending_token in reservations[index:]:
@@ -57,9 +57,8 @@ def _enqueue_reserved_runs(reservations: list[tuple[str, str]]) -> None:
                     task_id="", updated_at=timezone.now()
                 )
             raise
-        task_id = _extract_task_id(task_ref) or ""
         AgentRun.objects.filter(id=run_id, task_id=token).update(
-            task_id=task_id, updated_at=timezone.now()
+            task_id=task_result.id, updated_at=timezone.now()
         )
 
 
@@ -221,24 +220,6 @@ def _build_context(run: AgentRun) -> Any | None:
         return None
     context_factory = import_string(context_factory_path)
     return context_factory(run=run, metadata=run.metadata, owner=run.owner)
-
-
-def _enqueue_task(task: Any, *args: Any, **kwargs: Any) -> Any:
-    if hasattr(task, "enqueue"):
-        return task.enqueue(*args, **kwargs)
-    if hasattr(task, "delay"):
-        return task.delay(*args, **kwargs)
-    return task(*args, **kwargs)
-
-
-def _extract_task_id(task_ref: Any) -> str | None:
-    if task_ref is None:
-        return None
-    for attr in ("id", "task_id"):
-        value = getattr(task_ref, attr, None)
-        if value:
-            return str(value)
-    return None
 
 
 def _format_error(exc: Exception) -> str:

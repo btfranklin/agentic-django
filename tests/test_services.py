@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -9,7 +10,6 @@ from django.utils import timezone
 from agentic_django.models import AgentEvent, AgentRun, AgentSession
 from agentic_django.services import (
     _build_run_options,
-    _extract_task_id,
     _send_event_signals,
     dispatch_pending_runs,
     execute_run,
@@ -28,9 +28,16 @@ class DummyResult:
         self.released = True
 
 
-class DummyTask:
+class DummyTaskResult:
     def __init__(self, task_id: str) -> None:
         self.id = task_id
+
+
+def _replace_run_task(monkeypatch: pytest.MonkeyPatch, enqueue: Any) -> None:
+    monkeypatch.setattr(
+        "agentic_django.tasks.run_agent_task",
+        SimpleNamespace(enqueue=enqueue),
+    )
 
 
 @pytest.mark.django_db()
@@ -156,10 +163,10 @@ def test_dispatch_pending_runs(monkeypatch: pytest.MonkeyPatch, user: Any) -> No
         for _ in range(2)
     ]
 
-    def fake_enqueue(*args: Any, **kwargs: Any) -> DummyTask:
-        return DummyTask(task_id="task-1")
+    def fake_enqueue(run_id: str) -> DummyTaskResult:
+        return DummyTaskResult(task_id="task-1")
 
-    monkeypatch.setattr("agentic_django.services._enqueue_task", fake_enqueue)
+    _replace_run_task(monkeypatch, fake_enqueue)
     monkeypatch.setattr("agentic_django.services.get_concurrency_limit", lambda: 1)
 
     count = dispatch_pending_runs()
@@ -168,12 +175,6 @@ def test_dispatch_pending_runs(monkeypatch: pytest.MonkeyPatch, user: Any) -> No
     run_ids = {run.id for run in runs}
     updated = AgentRun.objects.filter(id__in=run_ids, task_id="task-1").count()
     assert updated == 1
-
-
-def test_extract_task_id() -> None:
-    assert _extract_task_id(DummyTask("abc")) == "abc"
-    assert _extract_task_id(type("Obj", (), {"task_id": "def"})()) == "def"
-    assert _extract_task_id(object()) is None
 
 
 @pytest.mark.django_db()
@@ -219,10 +220,7 @@ def test_dispatch_preserves_another_workers_active_run(
     )
     monkeypatch.setattr("agentic_django.services.get_concurrency_limit", lambda: 1)
     dispatched = []
-    monkeypatch.setattr(
-        "agentic_django.services._enqueue_task",
-        lambda *args: dispatched.append(args),
-    )
+    _replace_run_task(monkeypatch, lambda run_id: dispatched.append(run_id))
     assert dispatch_pending_runs() == 0
     execute_run(str(active.id))
     active.refresh_from_db()
@@ -274,11 +272,11 @@ def test_dispatch_selects_distinct_idle_sessions(
     ]
     sent = []
 
-    def enqueue(task: Any, run_id: str) -> DummyTask:
+    def enqueue(run_id: str) -> DummyTaskResult:
         sent.append(run_id)
-        return DummyTask(run_id)
+        return DummyTaskResult(run_id)
 
-    monkeypatch.setattr("agentic_django.services._enqueue_task", enqueue)
+    _replace_run_task(monkeypatch, enqueue)
     with override_settings(AGENTIC_DJANGO_CONCURRENCY_LIMIT=3):
         assert dispatch_pending_runs() == 2
     assert sent == [str(pending[1].id), str(pending[3].id)]
@@ -293,13 +291,13 @@ def test_initial_enqueue_waits_for_commit_and_is_discarded_on_rollback(
 
     sent = []
 
-    def enqueue(task: Any, run_id: str) -> DummyTask:
+    def enqueue(run_id: str) -> DummyTaskResult:
         assert not transaction.get_connection().in_atomic_block
         assert AgentRun.objects.filter(id=run_id).exists()
         sent.append(run_id)
-        return DummyTask("accepted")
+        return DummyTaskResult("accepted")
 
-    monkeypatch.setattr("agentic_django.services._enqueue_task", enqueue)
+    _replace_run_task(monkeypatch, enqueue)
     session = AgentSession.objects.create(session_key="commit", owner=user)
     with transaction.atomic():
         run = AgentRun.objects.create(
@@ -334,13 +332,13 @@ def test_queue_failure_releases_unsent_batch_for_retry(
     ]
     sent = []
 
-    def enqueue(task: Any, run_id: str) -> DummyTask:
+    def enqueue(run_id: str) -> DummyTaskResult:
         if len(sent) == 1:
             raise RuntimeError("queue unavailable")
         sent.append(run_id)
-        return DummyTask("accepted")
+        return DummyTaskResult("accepted")
 
-    monkeypatch.setattr("agentic_django.services._enqueue_task", enqueue)
+    _replace_run_task(monkeypatch, enqueue)
     with override_settings(AGENTIC_DJANGO_CONCURRENCY_LIMIT=3):
         with pytest.raises(RuntimeError, match="queue unavailable"):
             dispatch_pending_runs()
@@ -348,9 +346,9 @@ def test_queue_failure_releases_unsent_batch_for_retry(
         assert list(AgentRun.objects.exclude(id=runs[0].id).values_list(
             "task_id", flat=True
         )) == ["", ""]
-        monkeypatch.setattr(
-            "agentic_django.services._enqueue_task",
-            lambda *args: DummyTask("retried"),
+        _replace_run_task(
+            monkeypatch,
+            lambda run_id: DummyTaskResult("retried"),
         )
         assert dispatch_pending_runs() == 2
 
@@ -366,17 +364,15 @@ def test_initial_queue_failure_can_be_retried(
         session=session, owner=user, agent_key="default", input_payload="hi"
     )
 
-    def unavailable(*args: Any) -> None:
+    def unavailable(run_id: str) -> None:
         raise RuntimeError("offline")
 
-    monkeypatch.setattr("agentic_django.services._enqueue_task", unavailable)
+    _replace_run_task(monkeypatch, unavailable)
     with pytest.raises(RuntimeError):
         enqueue_agent_run(str(run.id))
     run.refresh_from_db()
     assert run.task_id == ""
-    monkeypatch.setattr(
-        "agentic_django.services._enqueue_task", lambda *args: DummyTask("retry")
-    )
+    _replace_run_task(monkeypatch, lambda run_id: DummyTaskResult("retry"))
     assert dispatch_pending_runs() == 1
 
 
@@ -395,11 +391,11 @@ def test_immediate_rejection_does_not_restore_obsolete_task_id(
         session=session, owner=user, agent_key="default", input_payload="next"
     )
 
-    def immediate(task: Any, run_id: str) -> DummyTask:
+    def immediate(run_id: str) -> DummyTaskResult:
         execute_run(run_id)
-        return DummyTask("already-finished-task")
+        return DummyTaskResult("already-finished-task")
 
-    monkeypatch.setattr("agentic_django.services._enqueue_task", immediate)
+    _replace_run_task(monkeypatch, immediate)
     enqueue_agent_run(str(pending.id))
     pending.refresh_from_db()
     assert pending.status == AgentRun.Status.PENDING

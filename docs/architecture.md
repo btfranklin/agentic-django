@@ -107,7 +107,8 @@ Initial enqueue and pending dispatch use the same queue submission helper. Each
 reservation has a unique token. On queue failure, the helper releases the failed
 reservation and the unsent part of its batch. These runs remain eligible for the
 next dispatch. Completion or rejection by an immediate worker cannot restore an
-obsolete reservation.
+obsolete reservation. Submission uses the decorated Django task's `enqueue()`
+method and stores the returned `TaskResult.id`.
 
 ## Session execution
 

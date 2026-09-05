@@ -114,22 +114,6 @@ class AgentRun(models.Model):
     def __str__(self) -> str:
         return f"{self.agent_key}:{self.status}"
 
-    def mark_running(self) -> None:
-        self.status = self.Status.RUNNING
-        self.started_at = timezone.now()
-        self.save(update_fields=["status", "started_at", "updated_at"])
-
-    def mark_completed(self) -> None:
-        self.status = self.Status.COMPLETED
-        self.finished_at = timezone.now()
-        self.save(update_fields=["status", "finished_at", "updated_at"])
-
-    def mark_failed(self, error: str) -> None:
-        self.status = self.Status.FAILED
-        self.error = error
-        self.finished_at = timezone.now()
-        self.save(update_fields=["status", "error", "finished_at", "updated_at"])
-
 
 class AgentEvent(models.Model):
     run = models.ForeignKey(

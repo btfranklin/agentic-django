@@ -4,6 +4,7 @@ from typing import Any
 
 import pytest
 from django.test import override_settings
+from django.utils import timezone
 
 from agentic_django.models import AgentEvent, AgentRun, AgentSession
 from agentic_django.services import (
@@ -58,6 +59,7 @@ def test_execute_run_success(monkeypatch: pytest.MonkeyPatch, user: Any) -> None
         status=AgentRun.Status.PENDING,
         input_payload="hello",
         metadata={},
+        task_id="task-success",
     )
 
     async def fake_run(*args: Any, **kwargs: Any) -> DummyResult:
@@ -74,6 +76,9 @@ def test_execute_run_success(monkeypatch: pytest.MonkeyPatch, user: Any) -> None
     assert run.raw_responses == [{"id": "resp"}]
     assert run.last_response_id == "resp"
     assert run.error == ""
+    assert run.task_id == ""
+    assert run.started_at is not None
+    assert run.finished_at is not None
 
 
 @pytest.mark.django_db()
@@ -86,6 +91,7 @@ def test_execute_run_failure(monkeypatch: pytest.MonkeyPatch, user: Any) -> None
         status=AgentRun.Status.PENDING,
         input_payload="hello",
         metadata={},
+        task_id="task-failure",
     )
 
     async def failing_run(*args: Any, **kwargs: Any) -> DummyResult:
@@ -100,6 +106,9 @@ def test_execute_run_failure(monkeypatch: pytest.MonkeyPatch, user: Any) -> None
     run.refresh_from_db()
     assert run.status == AgentRun.Status.FAILED
     assert run.error == "The agent run failed. Contact support with the run ID."
+    assert run.task_id == ""
+    assert run.started_at is not None
+    assert run.finished_at is not None
 
 
 @pytest.mark.django_db()
@@ -240,7 +249,9 @@ def test_session_reservation_blocks_overlap_but_allows_other_sessions(
         assert _reserve_run_slot(first)
         assert not _reserve_run_slot(second)
         assert _reserve_run_slot(independent)
-        first.mark_completed()
+        first.status = AgentRun.Status.COMPLETED
+        first.finished_at = timezone.now()
+        first.save(update_fields=["status", "finished_at", "updated_at"])
         assert _reserve_run_slot(second)
 
 

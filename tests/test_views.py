@@ -413,3 +413,38 @@ def test_create_run_preserves_json_context_text(
     assert response.status_code == 200
     run = AgentRun.objects.get(id=response.json()["run_id"])
     assert run.metadata["context"] == "123"
+
+
+@pytest.mark.django_db()
+@pytest.mark.parametrize(
+    "session_key", ["thread key", "thread/key", "café", "x" * 256, 123, ["thread"]],
+)
+def test_create_run_rejects_session_keys_outside_url_contract(
+    client: Client, user: Any, session_key: Any,
+) -> None:
+    client.force_login(user)
+    response = client.post(
+        "/runs/", data=json.dumps({"session_key": session_key, "input": "hello"}),
+        content_type="application/json",
+    )
+    assert response.status_code == 400
+    assert not AgentSession.objects.exists()
+    assert not AgentRun.objects.exists()
+
+
+@pytest.mark.django_db()
+@pytest.mark.parametrize("session_key", ["thread_A-123", "x" * 255])
+def test_created_session_key_can_retrieve_history(
+    monkeypatch: pytest.MonkeyPatch, client: Client, user: Any, session_key: str,
+) -> None:
+    client.force_login(user)
+    monkeypatch.setattr(
+        "agentic_django.views.enqueue_agent_run", lambda run_id: None,
+    )
+    response = client.post(
+        "/runs/", data={"session_key": session_key, "input": "hello"},
+    )
+    assert response.status_code == 200
+    response = client.get(f"/sessions/{session_key}/items/")
+    assert response.status_code == 200
+    assert response.json() == {"session_key": session_key, "items": []}

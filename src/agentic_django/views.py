@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from asgiref.sync import async_to_sync
@@ -37,6 +38,15 @@ class AgentRunCreateView(LoginRequiredMixin, View):
         session_key = payload.get("session_key")
         if not session_key:
             return JsonResponse({"error": "session_key is required"}, status=400)
+        if (
+            not isinstance(session_key, str)
+            or len(session_key) > 255
+            or re.fullmatch(r"[-a-zA-Z0-9_]+", session_key) is None
+        ):
+            return JsonResponse(
+                {"error": "session_key must be 1-255 ASCII letters, digits, _ or -"},
+                status=400,
+            )
 
         input_payload = payload.get("input")
         if input_payload in (None, ""):
@@ -53,11 +63,10 @@ class AgentRunCreateView(LoginRequiredMixin, View):
         if agent_key not in registry:
             return JsonResponse({"error": "Unknown agent_key"}, status=400)
 
-        session_key_value = str(session_key)
         # Initialize the configured session backend before creating the run.
-        get_session(session_key_value, request.user)
+        get_session(session_key, request.user)
         session, created = AgentSession.objects.get_or_create(
-            session_key=session_key_value,
+            session_key=session_key,
             owner=request.user,
         )
         if created:

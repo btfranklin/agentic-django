@@ -220,6 +220,9 @@ AGENTIC_DJANGO_CLEANUP_POLICY = {
 }
 ```
 
+Request limits use one database counter per user. Atomic updates enforce the
+limit across workers, without a cache dependency. Run migrations before use.
+
 ## Optional dependencies
 
 - RQ-backed tasks: `pdm install -G rq`

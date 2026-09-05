@@ -8,7 +8,6 @@ from asgiref.sync import async_to_sync
 from django.template.loader import render_to_string
 from django_htmx.http import HttpResponseStopPolling, trigger_client_event
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.core.cache import cache
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.views import View
@@ -16,6 +15,7 @@ from django.views import View
 from agentic_django.conf import get_settings, parse_rate_limit
 from agentic_django.models import AgentEvent, AgentRun, AgentSession
 from agentic_django.registry import get_agent_registry
+from agentic_django.rate_limits import admit_request
 from agentic_django.services import enqueue_agent_run
 from agentic_django.signals import agent_session_created
 from agentic_django.sessions import get_session
@@ -258,17 +258,8 @@ def _enforce_request_limits(request: HttpRequest) -> JsonResponse | None:
     user_id = getattr(request.user, "id", None)
     if user_id is None:
         return None
-    cache_key = f"agentic_django:rate:{user_id}"
-    current = cache.get(cache_key)
-    if current is None:
-        cache.set(cache_key, 1, timeout=period_seconds)
-        return None
-    if current >= max_calls:
+    if not admit_request(request.user, max_calls, period_seconds):
         return JsonResponse({"error": "rate limit exceeded"}, status=429)
-    try:
-        cache.incr(cache_key)
-    except ValueError:
-        cache.set(cache_key, current + 1, timeout=period_seconds)
     return None
 
 

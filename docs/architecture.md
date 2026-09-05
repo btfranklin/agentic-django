@@ -10,12 +10,13 @@ JSON and HTMX polling endpoints.
 | --- | --- | --- |
 | App config | `src/agentic_django/apps.py` | Registers the Django app and validates settings during app startup. |
 | Settings | `src/agentic_django/conf.py` | Reads and validates `AGENTIC_DJANGO_*` settings, cleanup policy, rate limits, and concurrency limits. |
-| Models | `src/agentic_django/models.py` | Stores sessions, ordered session items, runs, semantic events, and a global dispatch lock row. |
+| Models | `src/agentic_django/models.py` | Stores sessions, ordered session items, runs, semantic events, per-owner request counters, and a global dispatch lock row. |
 | Session backend | `src/agentic_django/sessions.py` | Implements the Agents SDK session protocol with ordered database-backed items. |
 | Registry | `src/agentic_django/registry.py` | Loads the host app's agent factory registry and resolves `agent_key` values. |
 | Serializers | `src/agentic_django/serializers.py` | Normalizes SDK results, session items, and semantic stream events into JSON-safe payloads. |
 | Services | `src/agentic_django/services.py` | Enqueues runs, dispatches pending work, executes SDK runs, persists outputs/events, sends signals, and recovers stuck runs. |
 | Tasks | `src/agentic_django/tasks.py` | Defines the Django task entry point that calls `execute_run`. |
+| Request limits | `src/agentic_django/rate_limits.py` | Reserves requests with conditional database updates to one counter per owner. |
 | Views and URLs | `src/agentic_django/views.py`, `src/agentic_django/urls.py` | Provide authenticated run creation, status, fragment, event, and session-history endpoints. |
 | Templates and CSS | `src/agentic_django/templates/agentic_django/`, `src/agentic_django/static/agentic_django/` | Ship default HTMX fragments and minimal package styling. |
 | Operations | `src/agentic_django/management/commands/` | Provides cleanup and run-recovery commands. |
@@ -55,6 +56,12 @@ JSON and HTMX polling endpoints.
 - Agent registries are host-app supplied. Do not expose powerful tools to
   untrusted input without host-app validation or allowlists.
 
+Request limits use `AgentRequestLimit`, with one row per owner. A conditional
+update resets an expired window. A second conditional update increments the
+count only when it is below the limit. Its affected-row count decides admission.
+These database operations enforce the limit across workers without cache or
+`select_for_update` assumptions. Deleting the owner removes the counter.
+
 ## Dependency Direction
 
 Keep dependencies mostly one-way:
@@ -63,6 +70,7 @@ Keep dependencies mostly one-way:
   serializers.
 - `serializers.py` should stay framework-light and avoid importing models,
   services, tasks, or views.
+- `rate_limits.py` may depend on models and Django database operations.
 - `sessions.py` may depend on settings, models, serializers, and signals.
 - `services.py` owns orchestration and may depend on settings, models,
   registry, serializers, sessions, tasks, and signals.

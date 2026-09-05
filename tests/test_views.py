@@ -6,7 +6,6 @@ from typing import Any
 import pytest
 from django.test import Client
 from django.test import override_settings
-from django.core.cache import cache
 from django_htmx.http import HTMX_STOP_POLLING
 
 from agentic_django.models import AgentEvent, AgentRun, AgentSession
@@ -172,7 +171,6 @@ def test_create_run_rate_limited(
         "agentic_django.views.enqueue_agent_run",
         lambda run_id: None,
     )
-    cache.clear()
 
     payload = {"session_key": "thread", "input": "hello"}
     with override_settings(AGENTIC_DJANGO_RATE_LIMIT="1/m"):

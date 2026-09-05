@@ -18,6 +18,11 @@
   - `AGENTIC_DJANGO_MAX_INPUT_BYTES`
   - `AGENTIC_DJANGO_MAX_INPUT_ITEMS`
 
+Request limits use one database counter per owner. Conditional database updates
+reserve each request, so concurrent workers cannot exceed the configured limit.
+The window starts with the first request and resets after the configured period.
+Cache settings do not affect request limits.
+
 ## Content Security Policy
 
 - Prefer Django 6 CSP support when embedding polling or tool-driven UIs.

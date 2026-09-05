@@ -26,6 +26,12 @@
 - Persists semantic stream events when `AGENTIC_DJANGO_ENABLE_EVENTS = True`.
 - Each event has a `sequence` and JSON-safe `payload`.
 
+## AgentRequestLimit
+
+- Stores one request counter and window start time per owner.
+- Conditional database updates enforce the configured request limit.
+- Deleting the owner also deletes the counter.
+
 ## Session backends
 
 - Default: `DatabaseSession`, backed by `AgentSessionItem` rows.

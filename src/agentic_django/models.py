@@ -156,3 +156,13 @@ class AgentRunLock(models.Model):
 
     def __str__(self) -> str:
         return self.key
+
+
+class AgentRequestLimit(models.Model):
+    owner = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="agent_request_limit",
+    )
+    window_started_at = models.DateTimeField(default=timezone.now)
+    count = models.PositiveBigIntegerField(default=0)

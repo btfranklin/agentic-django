@@ -197,3 +197,26 @@ def test_send_event_signals(user: Any) -> None:
 
     assert received
     assert received[0]["event_type"] == "tool_called"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_dispatch_preserves_another_workers_active_run(
+    monkeypatch: pytest.MonkeyPatch, user: Any
+) -> None:
+    session = AgentSession.objects.create(session_key="active", owner=user)
+    active = AgentRun.objects.create(
+        session=session, owner=user, agent_key="default", input_payload="hi",
+        status=AgentRun.Status.RUNNING, task_id="active-worker",
+    )
+    monkeypatch.setattr("agentic_django.services.get_concurrency_limit", lambda: 1)
+    dispatched = []
+    monkeypatch.setattr(
+        "agentic_django.services._enqueue_task",
+        lambda *args: dispatched.append(args),
+    )
+    assert dispatch_pending_runs() == 0
+    execute_run(str(active.id))
+    active.refresh_from_db()
+    assert active.status == AgentRun.Status.RUNNING
+    assert active.task_id == "active-worker"
+    assert dispatched == []

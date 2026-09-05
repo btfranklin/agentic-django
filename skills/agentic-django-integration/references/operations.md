@@ -22,17 +22,11 @@ python manage.py agentic_django_cleanup --dry-run
 python manage.py agentic_django_cleanup --events-days 14 --runs-days 60
 ```
 
-## Startup recovery
+## Run recovery
 
-Handle runs that were `running` during a restart:
-
-```python
-AGENTIC_DJANGO_STARTUP_RECOVERY = "fail"  # default is "requeue"
-```
-
-Startup recovery runs the first time a process dispatches or executes a run (so it avoids database work in `AppConfig.ready()`).
-
-Or run it manually:
+Stop all run workers and pause submissions before manual recovery. Do not infer
+that a run has stopped from a new process starting. Requeue only when repeating
+the run and its tool actions is safe.
 
 ```bash
 python manage.py agentic_django_recover_runs --mode=fail

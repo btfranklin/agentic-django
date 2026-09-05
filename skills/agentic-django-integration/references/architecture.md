@@ -22,7 +22,7 @@ Pending runs are dispatched up to `AGENTIC_DJANGO_CONCURRENCY_LIMIT`.
 Dispatch uses database locking to avoid race conditions and then enqueues tasks
 after commit to keep transactions short.
 
-## Startup recovery
+## Run recovery
 
-On the first dispatch/execution in each process, the package can mark
-`running` runs as failed or requeue them based on `AGENTIC_DJANGO_STARTUP_RECOVERY`.
+Recovery is manual and requires stopped workers and paused submissions. Process
+startup does not change existing run status.

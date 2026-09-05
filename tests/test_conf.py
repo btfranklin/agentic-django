@@ -51,15 +51,6 @@ def test_validate_settings_rate_limit_invalid() -> None:
             validate_settings()
 
 
-def test_validate_settings_startup_recovery_invalid() -> None:
-    with override_settings(
-        AGENTIC_DJANGO_AGENT_REGISTRY="tests.support.get_agent_registry",
-        AGENTIC_DJANGO_STARTUP_RECOVERY="maybe",
-    ):
-        with pytest.raises(ImproperlyConfigured):
-            validate_settings()
-
-
 def test_validate_settings_cleanup_policy_invalid_type() -> None:
     with override_settings(
         AGENTIC_DJANGO_AGENT_REGISTRY="tests.support.get_agent_registry",

@@ -209,9 +209,6 @@ AGENTIC_DJANGO_RATE_LIMIT = "20/m"
 AGENTIC_DJANGO_MAX_INPUT_BYTES = 20_000
 AGENTIC_DJANGO_MAX_INPUT_ITEMS = 20
 
-# Optional: override startup recovery (default: requeue)
-AGENTIC_DJANGO_STARTUP_RECOVERY = "fail"
-
 # Optional: cleanup policy for old records
 AGENTIC_DJANGO_CLEANUP_POLICY = {
     "events_days": 7,
@@ -273,8 +270,10 @@ python manage.py agentic_django_recover_runs --mode=fail
 python manage.py agentic_django_recover_runs --mode=requeue
 ```
 
-Startup recovery runs on the first run dispatch/execution in each process, so it does
-not touch the database during app initialization.
+Recovery is manual. Stop all run workers and pause submissions before recovery.
+A new process must not reset work that another worker still executes. The
+`AGENTIC_DJANGO_STARTUP_RECOVERY` setting has been removed. Requeue only when
+repeating the run and its tool actions is safe.
 
 ## Security notes
 

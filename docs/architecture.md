@@ -87,6 +87,12 @@ test for the behavior that made the edge necessary.
 - Template overrides: downstream projects may override
   `templates/agentic_django/...` paths.
 
+## Recovery
+
+Recovery is an explicit maintenance operation. Stop workers and pause submissions
+before recovery. Process startup does not reset active runs. Requeue can repeat
+tool actions, so the operator must check that repetition is safe.
+
 ## Current Limits
 
 - The package uses polling in v1; it does not ship SSE or WebSocket push.

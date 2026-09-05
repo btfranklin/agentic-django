@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import threading
 import traceback
 from typing import Any
 
@@ -9,7 +8,6 @@ from asgiref.sync import async_to_sync, sync_to_async
 from django.conf import settings as django_settings
 from django.db import connection, transaction
 from django.db.models import Max
-from django.db.utils import OperationalError, ProgrammingError
 from django.utils import timezone
 from django.utils.module_loading import import_string
 
@@ -29,9 +27,6 @@ from agentic_django.signals import (
 )
 
 logger = logging.getLogger(__name__)
-_startup_recovery_done = False
-_startup_recovery_in_progress = False
-_startup_recovery_lock = threading.Lock()
 
 
 def enqueue_agent_run(run_id: str) -> None:
@@ -47,7 +42,6 @@ def enqueue_agent_run(run_id: str) -> None:
 
 
 def dispatch_pending_runs() -> int:
-    maybe_recover_stuck_runs()
     from agentic_django.tasks import run_agent_task
 
     limit = get_concurrency_limit()
@@ -96,7 +90,6 @@ def dispatch_pending_runs() -> int:
 
 
 def execute_run(run_id: str) -> None:
-    maybe_recover_stuck_runs()
     run = AgentRun.objects.select_related("session", "owner").get(id=run_id)
     if run.status != AgentRun.Status.PENDING:
         return
@@ -383,26 +376,3 @@ def recover_stuck_runs(mode: str) -> int:
         dispatch_pending_runs()
     return updated
 
-
-def maybe_recover_stuck_runs() -> None:
-    global _startup_recovery_done
-    global _startup_recovery_in_progress
-
-    if _startup_recovery_done or _startup_recovery_in_progress:
-        return
-    with _startup_recovery_lock:
-        if _startup_recovery_done or _startup_recovery_in_progress:
-            return
-        mode = get_settings().startup_recovery
-        if mode == "ignore":
-            _startup_recovery_done = True
-            return
-        _startup_recovery_in_progress = True
-        try:
-            recover_stuck_runs(mode)
-        except (OperationalError, ProgrammingError):
-            logger.debug("Skipping startup recovery; database not ready.")
-            return
-        finally:
-            _startup_recovery_in_progress = False
-        _startup_recovery_done = True

@@ -27,7 +27,6 @@ class AgenticDjangoSettings:
     rate_limit: str | None
     max_input_bytes: int | None
     max_input_items: int | None
-    startup_recovery: str
 
 
 def _get_setting(name: str, default: Any) -> Any:
@@ -85,7 +84,6 @@ def get_settings() -> AgenticDjangoSettings:
         rate_limit=_get_setting("AGENTIC_DJANGO_RATE_LIMIT", None),
         max_input_bytes=_get_setting("AGENTIC_DJANGO_MAX_INPUT_BYTES", None),
         max_input_items=_get_setting("AGENTIC_DJANGO_MAX_INPUT_ITEMS", None),
-        startup_recovery=_get_setting("AGENTIC_DJANGO_STARTUP_RECOVERY", "requeue"),
     )
 
 
@@ -211,8 +209,4 @@ def validate_settings() -> None:
         raise ImproperlyConfigured("AGENTIC_DJANGO_MAX_INPUT_BYTES must be >= 1")
     if config.max_input_items is not None and config.max_input_items < 1:
         raise ImproperlyConfigured("AGENTIC_DJANGO_MAX_INPUT_ITEMS must be >= 1")
-    if config.startup_recovery not in {"ignore", "fail", "requeue"}:
-        raise ImproperlyConfigured(
-            "AGENTIC_DJANGO_STARTUP_RECOVERY must be 'ignore', 'fail', or 'requeue'"
-        )
     normalize_cleanup_policy(config.cleanup_policy)

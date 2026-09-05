@@ -45,3 +45,6 @@ def handle_event(sender, run, event, sequence, event_type, payload, **kwargs):
 
 agent_run_event.connect(handle_event, weak=False)
 ```
+
+The event and session history endpoints accept a non-negative integer `limit`.
+A limit of zero returns no items. Invalid and negative limits return HTTP 400.

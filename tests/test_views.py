@@ -448,3 +448,63 @@ def test_created_session_key_can_retrieve_history(
     response = client.get(f"/sessions/{session_key}/items/")
     assert response.status_code == 200
     assert response.json() == {"session_key": session_key, "items": []}
+
+
+@pytest.mark.django_db()
+@pytest.mark.parametrize("limit", ["-1", "invalid"])
+@pytest.mark.parametrize("endpoint", ["items", "events"])
+def test_history_endpoints_reject_invalid_limits(
+    client: Client, user: Any, limit: str, endpoint: str,
+) -> None:
+    client.force_login(user)
+    session = AgentSession.objects.create(session_key="thread", owner=user)
+    run = AgentRun.objects.create(
+        session=session, owner=user, agent_key="default", input_payload="hello",
+    )
+    url = (
+        "/sessions/thread/items/" if endpoint == "items" else f"/runs/{run.id}/events/"
+    )
+    with override_settings(AGENTIC_DJANGO_ENABLE_EVENTS=True):
+        response = client.get(url, {"limit": limit})
+    assert response.status_code == 400
+    assert response.json()["error"] == "limit must be a non-negative integer"
+
+
+@pytest.mark.django_db()
+@pytest.mark.parametrize("endpoint", ["items", "events"])
+def test_history_endpoints_accept_zero_limit(
+    client: Client, user: Any, endpoint: str,
+) -> None:
+    client.force_login(user)
+    session = AgentSession.objects.create(session_key="thread", owner=user)
+    session.items.create(sequence=1, payload={"role": "user", "content": "hello"})
+    run = AgentRun.objects.create(
+        session=session, owner=user, agent_key="default", input_payload="hello",
+    )
+    AgentEvent.objects.create(
+        run=run, sequence=1, event_type="tool_called", payload={"name": "tool"},
+    )
+    url = (
+        "/sessions/thread/items/" if endpoint == "items" else f"/runs/{run.id}/events/"
+    )
+    with override_settings(AGENTIC_DJANGO_ENABLE_EVENTS=True):
+        response = client.get(url, {"limit": 0})
+    assert response.status_code == 200
+    assert response.json()[endpoint] == []
+
+
+@pytest.mark.django_db()
+@pytest.mark.parametrize("agent_key", [["default"], [], {"key": "default"}, 123])
+def test_create_run_rejects_invalid_agent_key_type(
+    client: Client, user: Any, agent_key: Any,
+) -> None:
+    client.force_login(user)
+    response = client.post(
+        "/runs/", content_type="application/json",
+        data=json.dumps({
+            "session_key": "thread", "input": "hello", "agent_key": agent_key,
+        }),
+    )
+    assert response.status_code == 400
+    assert response.json()["error"] == "agent_key must be a string"
+    assert not AgentRun.objects.exists()

@@ -58,7 +58,11 @@ class AgentRunCreateView(LoginRequiredMixin, View):
             return input_limit_error
 
         settings_config = get_settings()
-        agent_key = payload.get("agent_key") or settings_config.default_agent_key
+        agent_key = payload.get("agent_key")
+        if agent_key is None or agent_key == "":
+            agent_key = settings_config.default_agent_key
+        if not isinstance(agent_key, str):
+            return JsonResponse({"error": "agent_key must be a string"}, status=400)
         registry = get_agent_registry()
         if agent_key not in registry:
             return JsonResponse({"error": "Unknown agent_key"}, status=400)
@@ -123,15 +127,14 @@ class AgentRunEventsView(LoginRequiredMixin, View):
 
         run = get_object_or_404(AgentRun, id=run_id, owner=request.user)
         after_param = request.GET.get("after")
-        limit_param = request.GET.get("limit")
         try:
             after = int(after_param) if after_param else None
         except ValueError:
             return JsonResponse({"error": "after must be an integer"}, status=400)
         try:
-            limit = int(limit_param) if limit_param else None
-        except ValueError:
-            return JsonResponse({"error": "limit must be an integer"}, status=400)
+            limit = _parse_limit(request)
+        except ValueError as exc:
+            return JsonResponse({"error": str(exc)}, status=400)
 
         events = AgentEvent.objects.filter(run=run).order_by("sequence")
         if after is not None:
@@ -158,12 +161,11 @@ class AgentSessionItemsView(LoginRequiredMixin, View):
             session_key=session_key,
             owner=request.user,
         )
-        backend_session = get_session(session.session_key, request.user)
-        limit_param = request.GET.get("limit")
         try:
-            limit = int(limit_param) if limit_param else None
-        except ValueError:
-            return JsonResponse({"error": "limit must be an integer"}, status=400)
+            limit = _parse_limit(request)
+        except ValueError as exc:
+            return JsonResponse({"error": str(exc)}, status=400)
+        backend_session = get_session(session.session_key, request.user)
         items = async_to_sync(backend_session.get_items)(limit)
         if _is_htmx(request):
             html_items = [{"payload": item} for item in items]
@@ -173,6 +175,20 @@ class AgentSessionItemsView(LoginRequiredMixin, View):
                 {"session": session, "items": html_items},
             )
         return JsonResponse({"session_key": session_key, "items": items})
+
+
+
+def _parse_limit(request: HttpRequest) -> int | None:
+    value = request.GET.get("limit")
+    if not value:
+        return None
+    try:
+        limit = int(value)
+    except ValueError as exc:
+        raise ValueError("limit must be a non-negative integer") from exc
+    if limit < 0:
+        raise ValueError("limit must be a non-negative integer")
+    return limit
 
 
 def _parse_payload(request: HttpRequest) -> dict[str, Any]:

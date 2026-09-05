@@ -4,7 +4,9 @@
 
 - Agent execution errors mark runs as `failed`.
 - When `DEBUG=True`, error payloads include full tracebacks.
-- When `DEBUG=False`, errors are sanitized to `ClassName: message`.
+- When `DEBUG=False`, users receive a generic failure message. Exception text
+  stays in server logs and is not included in the response. Use the run ID to
+  find the detailed server error.
 
 ## Ownership and access
 

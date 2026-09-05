@@ -99,7 +99,7 @@ def test_execute_run_failure(monkeypatch: pytest.MonkeyPatch, user: Any) -> None
 
     run.refresh_from_db()
     assert run.status == AgentRun.Status.FAILED
-    assert "RuntimeError" in run.error
+    assert run.error == "The agent run failed. Contact support with the run ID."
 
 
 @pytest.mark.django_db()
@@ -129,7 +129,7 @@ def test_execute_run_failure_sanitized(
     run.refresh_from_db()
     assert run.status == AgentRun.Status.FAILED
     assert "Traceback" not in run.error
-    assert run.error == "RuntimeError: boom"
+    assert run.error == "The agent run failed. Contact support with the run ID."
 
 
 @pytest.mark.django_db(transaction=True)

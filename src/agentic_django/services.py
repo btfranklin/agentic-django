@@ -244,10 +244,7 @@ def _extract_task_id(task_ref: Any) -> str | None:
 def _format_error(exc: Exception) -> str:
     if django_settings.DEBUG:
         return "".join(traceback.format_exception(exc)).strip()
-    message = str(exc).strip()
-    if message:
-        return f"{exc.__class__.__name__}: {message}"
-    return exc.__class__.__name__
+    return "The agent run failed. Contact support with the run ID."
 
 
 def _get_serializer() -> JsonSerializer:
@@ -385,4 +382,3 @@ def recover_stuck_runs(mode: str) -> int:
     if mode == "requeue" and updated:
         dispatch_pending_runs()
     return updated
-

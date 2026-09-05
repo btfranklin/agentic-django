@@ -50,7 +50,7 @@ JSON and HTMX polling endpoints.
 - `AgentSession.session_key` is unique only within an owner.
 - Event access is mediated through the owning run.
 - Error text is traceback-level only when `DEBUG=True`; production errors are
-  summarized.
+  replaced with a generic message. Full exception text stays in server logs.
 - Rate limits and request-size/input-item limits are enforced before run
   creation when configured.
 - Agent registries are host-app supplied. Do not expose powerful tools to

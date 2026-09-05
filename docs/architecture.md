@@ -25,7 +25,7 @@ JSON and HTMX polling endpoints.
 1. `AgentRunCreateView` authenticates the user, validates payload shape and
    limits, resolves the agent key, ensures the configured session backend can
    create the session, creates an `AgentRun`, and enqueues it.
-2. `enqueue_agent_run` schedules `run_agent_task` through the configured
+2. `enqueue_agent_run` schedules `run_agent_task` after the creation transaction commits through the configured
    Django-tasks backend and stores a task id when one is available.
 3. `execute_run` reserves a global concurrency slot and exclusive session access, sends `agent_run_started`, builds
    the agent/session/context/run options, and calls the Agents SDK runner.

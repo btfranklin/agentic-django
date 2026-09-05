@@ -34,13 +34,16 @@ logger = logging.getLogger(__name__)
 def enqueue_agent_run(run_id: str) -> None:
     from agentic_django.tasks import run_agent_task
 
-    task_ref = _enqueue_task(run_agent_task, run_id)
-    task_id = _extract_task_id(task_ref)
-    if task_id:
-        AgentRun.objects.filter(id=run_id).update(
-            task_id=task_id,
-            updated_at=timezone.now(),
-        )
+    def _enqueue() -> None:
+        task_ref = _enqueue_task(run_agent_task, run_id)
+        task_id = _extract_task_id(task_ref)
+        if task_id:
+            AgentRun.objects.filter(
+                id=run_id,
+                status__in=[AgentRun.Status.PENDING, AgentRun.Status.RUNNING],
+            ).update(task_id=task_id, updated_at=timezone.now())
+
+    transaction.on_commit(_enqueue)
 
 
 def dispatch_pending_runs() -> int:

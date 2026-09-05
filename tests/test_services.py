@@ -271,3 +271,40 @@ def test_dispatch_selects_distinct_idle_sessions(
     with override_settings(AGENTIC_DJANGO_CONCURRENCY_LIMIT=3):
         assert dispatch_pending_runs() == 2
     assert sent == [str(pending[1].id), str(pending[3].id)]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_initial_enqueue_waits_for_commit_and_is_discarded_on_rollback(
+    monkeypatch: pytest.MonkeyPatch, user: Any
+) -> None:
+    from django.db import transaction
+    from agentic_django.services import enqueue_agent_run
+
+    sent = []
+
+    def enqueue(task: Any, run_id: str) -> DummyTask:
+        assert not transaction.get_connection().in_atomic_block
+        assert AgentRun.objects.filter(id=run_id).exists()
+        sent.append(run_id)
+        return DummyTask("accepted")
+
+    monkeypatch.setattr("agentic_django.services._enqueue_task", enqueue)
+    session = AgentSession.objects.create(session_key="commit", owner=user)
+    with transaction.atomic():
+        run = AgentRun.objects.create(
+            session=session, owner=user, agent_key="default", input_payload="hi"
+        )
+        enqueue_agent_run(str(run.id))
+        assert not sent
+    assert sent == [str(run.id)]
+    run.refresh_from_db()
+    assert run.task_id == "accepted"
+
+    with pytest.raises(RuntimeError), transaction.atomic():
+        rolled_back = AgentRun.objects.create(
+            session=session, owner=user, agent_key="default", input_payload="hi"
+        )
+        enqueue_agent_run(str(rolled_back.id))
+        raise RuntimeError("rollback")
+    assert sent == [str(run.id)]
+    assert not AgentRun.objects.filter(id=rolled_back.id).exists()

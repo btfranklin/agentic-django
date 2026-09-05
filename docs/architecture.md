@@ -87,6 +87,12 @@ test for the behavior that made the edge necessary.
 - Template overrides: downstream projects may override
   `templates/agentic_django/...` paths.
 
+## Lifecycle notifications
+
+Run signals are notifications. Receiver exceptions are logged and do not change
+run status or prevent other receivers from running. Setup failures within the
+executor mark the run failed and release its slot.
+
 ## Queue reservations
 
 Initial enqueue and pending dispatch use the same queue submission helper. Each

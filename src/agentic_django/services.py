@@ -112,9 +112,9 @@ def execute_run(run_id: str) -> None:
         dispatch_pending_runs()
         return
 
-    agent_run_started.send(sender=AgentRun, run=run)
-    serializer = _get_serializer()
     try:
+        agent_run_started.send_robust(sender=AgentRun, run=run)
+        serializer = _get_serializer()
         agent = get_agent(run.agent_key)
         session = get_session(run.session.session_key, run.owner)
         run_options = _build_run_options(run)
@@ -155,7 +155,7 @@ def execute_run(run_id: str) -> None:
                 "updated_at",
             ]
         )
-        agent_run_completed.send(sender=AgentRun, run=run, result=result)
+        agent_run_completed.send_robust(sender=AgentRun, run=run, result=result)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Agent run failed", extra={"run_id": str(run.id)})
         error = _format_error(exc)
@@ -172,7 +172,7 @@ def execute_run(run_id: str) -> None:
                 "updated_at",
             ]
         )
-        agent_run_failed.send(sender=AgentRun, run=run, exception=exc)
+        agent_run_failed.send_robust(sender=AgentRun, run=run, exception=exc)
         raise
     finally:
         dispatch_pending_runs()

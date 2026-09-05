@@ -393,3 +393,94 @@ def test_immediate_rejection_does_not_restore_obsolete_task_id(
     pending.refresh_from_db()
     assert pending.status == AgentRun.Status.PENDING
     assert pending.task_id == ""
+
+
+@pytest.mark.django_db()
+@pytest.mark.parametrize("signal_name", ["agent_run_started", "agent_run_completed"])
+def test_notification_failure_does_not_fail_successful_run(
+    monkeypatch: pytest.MonkeyPatch, user: Any, signal_name: str
+) -> None:
+    from agentic_django import signals
+
+    session = AgentSession.objects.create(session_key="signals", owner=user)
+    run = AgentRun.objects.create(
+        session=session, owner=user, agent_key="default", input_payload="hi"
+    )
+    received = []
+
+    def broken(sender: Any, **kwargs: Any) -> None:
+        raise RuntimeError("notification failed")
+
+    def healthy(sender: Any, **kwargs: Any) -> None:
+        received.append(kwargs["run"].id)
+
+    async def runner(*args: Any, **kwargs: Any) -> DummyResult:
+        return DummyResult()
+
+    signal = getattr(signals, signal_name)
+    signal.connect(broken, weak=False)
+    signal.connect(healthy, weak=False)
+    monkeypatch.setattr("agentic_django.services.get_agent", lambda key: object())
+    monkeypatch.setattr("agentic_django.services.Runner.run", runner)
+    try:
+        execute_run(str(run.id))
+    finally:
+        signal.disconnect(broken)
+        signal.disconnect(healthy)
+    run.refresh_from_db()
+    assert run.status == AgentRun.Status.COMPLETED
+    assert run.final_output == {"ok": True}
+    assert received == [run.id]
+
+
+@pytest.mark.django_db()
+def test_serializer_setup_failure_releases_run_slot(
+    monkeypatch: pytest.MonkeyPatch, user: Any
+) -> None:
+    session = AgentSession.objects.create(session_key="setup", owner=user)
+    run = AgentRun.objects.create(
+        session=session, owner=user, agent_key="default", input_payload="hi"
+    )
+
+    def broken() -> None:
+        raise RuntimeError("setup failed")
+
+    dispatched = []
+    monkeypatch.setattr("agentic_django.services._get_serializer", broken)
+    monkeypatch.setattr(
+        "agentic_django.services.dispatch_pending_runs", lambda: dispatched.append(True)
+    )
+    with pytest.raises(RuntimeError, match="setup failed"):
+        execute_run(str(run.id))
+    run.refresh_from_db()
+    assert run.status == AgentRun.Status.FAILED
+    assert run.finished_at is not None
+    assert dispatched == [True]
+
+
+@pytest.mark.django_db()
+def test_failure_notification_preserves_original_error(
+    monkeypatch: pytest.MonkeyPatch, user: Any
+) -> None:
+    from agentic_django.signals import agent_run_failed
+
+    session = AgentSession.objects.create(session_key="failure", owner=user)
+    run = AgentRun.objects.create(
+        session=session, owner=user, agent_key="default", input_payload="hi"
+    )
+
+    def broken(sender: Any, **kwargs: Any) -> None:
+        raise RuntimeError("notification failed")
+
+    def broken_agent(key: str) -> None:
+        raise ValueError("original failure")
+
+    monkeypatch.setattr("agentic_django.services.get_agent", broken_agent)
+    agent_run_failed.connect(broken, weak=False)
+    try:
+        with pytest.raises(ValueError, match="original failure"):
+            execute_run(str(run.id))
+    finally:
+        agent_run_failed.disconnect(broken)
+    run.refresh_from_db()
+    assert run.status == AgentRun.Status.FAILED

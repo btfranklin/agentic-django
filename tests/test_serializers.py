@@ -12,7 +12,6 @@ from agentic_django.serializers import (
     JsonSerializer,
     StreamEventSerializer,
     _to_jsonable,
-    pretty_json,
 )
 
 
@@ -52,12 +51,6 @@ def test_serializer_round_trip() -> None:
     serializer = JsonSerializer()
     payload = {"items": [1, 2, 3]}
     assert serializer.deserialize(serializer.serialize(payload)) == payload
-
-
-def test_pretty_json_returns_string() -> None:
-    result = pretty_json({"ok": True})
-    assert isinstance(result, str)
-
 
 def test_stream_event_serializer_handles_events() -> None:
     serializer = StreamEventSerializer()

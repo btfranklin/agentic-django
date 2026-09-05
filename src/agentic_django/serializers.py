@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import dataclasses
-import json
 from typing import Any
 
 from agents.stream_events import (
@@ -11,8 +10,6 @@ from agents.stream_events import (
     StreamEvent,
 )
 from pydantic import BaseModel
-from django.utils.html import escape
-from django.utils.safestring import mark_safe
 
 
 class JsonSerializer:
@@ -53,12 +50,6 @@ class StreamEventSerializer:
 
     def deserialize(self, value: Any) -> Any:
         return value
-
-
-def pretty_json(value: Any) -> str:
-    text = json.dumps(_to_jsonable(value), indent=2, sort_keys=True, ensure_ascii=True)
-    return mark_safe(escape(text))
-
 
 def _to_jsonable(value: Any) -> Any:
     if isinstance(value, BaseModel):

@@ -308,3 +308,88 @@ def test_initial_enqueue_waits_for_commit_and_is_discarded_on_rollback(
         raise RuntimeError("rollback")
     assert sent == [str(run.id)]
     assert not AgentRun.objects.filter(id=rolled_back.id).exists()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_queue_failure_releases_unsent_batch_for_retry(
+    monkeypatch: pytest.MonkeyPatch, user: Any
+) -> None:
+    runs = [
+        AgentRun.objects.create(
+            session=AgentSession.objects.create(session_key=str(i), owner=user),
+            owner=user, agent_key="default", input_payload="hi",
+        )
+        for i in range(3)
+    ]
+    sent = []
+
+    def enqueue(task: Any, run_id: str) -> DummyTask:
+        if len(sent) == 1:
+            raise RuntimeError("queue unavailable")
+        sent.append(run_id)
+        return DummyTask("accepted")
+
+    monkeypatch.setattr("agentic_django.services._enqueue_task", enqueue)
+    with override_settings(AGENTIC_DJANGO_CONCURRENCY_LIMIT=3):
+        with pytest.raises(RuntimeError, match="queue unavailable"):
+            dispatch_pending_runs()
+        assert AgentRun.objects.get(id=runs[0].id).task_id == "accepted"
+        assert list(AgentRun.objects.exclude(id=runs[0].id).values_list(
+            "task_id", flat=True
+        )) == ["", ""]
+        monkeypatch.setattr(
+            "agentic_django.services._enqueue_task",
+            lambda *args: DummyTask("retried"),
+        )
+        assert dispatch_pending_runs() == 2
+
+
+@pytest.mark.django_db(transaction=True)
+def test_initial_queue_failure_can_be_retried(
+    monkeypatch: pytest.MonkeyPatch, user: Any
+) -> None:
+    from agentic_django.services import enqueue_agent_run
+
+    session = AgentSession.objects.create(session_key="retry", owner=user)
+    run = AgentRun.objects.create(
+        session=session, owner=user, agent_key="default", input_payload="hi"
+    )
+
+    def unavailable(*args: Any) -> None:
+        raise RuntimeError("offline")
+
+    monkeypatch.setattr("agentic_django.services._enqueue_task", unavailable)
+    with pytest.raises(RuntimeError):
+        enqueue_agent_run(str(run.id))
+    run.refresh_from_db()
+    assert run.task_id == ""
+    monkeypatch.setattr(
+        "agentic_django.services._enqueue_task", lambda *args: DummyTask("retry")
+    )
+    assert dispatch_pending_runs() == 1
+
+
+@pytest.mark.django_db(transaction=True)
+def test_immediate_rejection_does_not_restore_obsolete_task_id(
+    monkeypatch: pytest.MonkeyPatch, user: Any
+) -> None:
+    from agentic_django.services import enqueue_agent_run
+
+    session = AgentSession.objects.create(session_key="busy", owner=user)
+    AgentRun.objects.create(
+        session=session, owner=user, agent_key="default", input_payload="hi",
+        status=AgentRun.Status.RUNNING,
+    )
+    pending = AgentRun.objects.create(
+        session=session, owner=user, agent_key="default", input_payload="next"
+    )
+
+    def immediate(task: Any, run_id: str) -> DummyTask:
+        execute_run(run_id)
+        return DummyTask("already-finished-task")
+
+    monkeypatch.setattr("agentic_django.services._enqueue_task", immediate)
+    enqueue_agent_run(str(pending.id))
+    pending.refresh_from_db()
+    assert pending.status == AgentRun.Status.PENDING
+    assert pending.task_id == ""

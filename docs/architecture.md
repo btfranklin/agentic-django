@@ -87,6 +87,14 @@ test for the behavior that made the edge necessary.
 - Template overrides: downstream projects may override
   `templates/agentic_django/...` paths.
 
+## Queue reservations
+
+Initial enqueue and pending dispatch use the same queue submission helper. Each
+reservation has a unique token. On queue failure, the helper releases the failed
+reservation and the unsent part of its batch. These runs remain eligible for the
+next dispatch. Completion or rejection by an immediate worker cannot restore an
+obsolete reservation.
+
 ## Session execution
 
 Only one run per session can have `running` status. Dispatch and execution check

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import traceback
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -32,23 +33,37 @@ logger = logging.getLogger(__name__)
 
 
 def enqueue_agent_run(run_id: str) -> None:
-    from agentic_django.tasks import run_agent_task
-
     def _enqueue() -> None:
-        task_ref = _enqueue_task(run_agent_task, run_id)
-        task_id = _extract_task_id(task_ref)
-        if task_id:
-            AgentRun.objects.filter(
-                id=run_id,
-                status__in=[AgentRun.Status.PENDING, AgentRun.Status.RUNNING],
-            ).update(task_id=task_id, updated_at=timezone.now())
+        token = f"queued:{uuid.uuid4()}"
+        reserved = AgentRun.objects.filter(
+            id=run_id, status=AgentRun.Status.PENDING, task_id=""
+        ).update(task_id=token, updated_at=timezone.now())
+        if reserved:
+            _enqueue_reserved_runs([(run_id, token)])
 
     transaction.on_commit(_enqueue)
 
 
-def dispatch_pending_runs() -> int:
+def _enqueue_reserved_runs(reservations: list[tuple[str, str]]) -> None:
     from agentic_django.tasks import run_agent_task
 
+    for index, (run_id, token) in enumerate(reservations):
+        try:
+            task_ref = _enqueue_task(run_agent_task, run_id)
+        except Exception:
+            # Release only reservations that this callback still owns.
+            for pending_id, pending_token in reservations[index:]:
+                AgentRun.objects.filter(id=pending_id, task_id=pending_token).update(
+                    task_id="", updated_at=timezone.now()
+                )
+            raise
+        task_id = _extract_task_id(task_ref) or ""
+        AgentRun.objects.filter(id=run_id, task_id=token).update(
+            task_id=task_id, updated_at=timezone.now()
+        )
+
+
+def dispatch_pending_runs() -> int:
     limit = get_concurrency_limit()
     enqueued: list[tuple[str, str]] = []
     with _dispatch_lock():
@@ -72,7 +87,7 @@ def dispatch_pending_runs() -> int:
             if run.session_id in active_sessions:
                 continue
             active_sessions.add(run.session_id)
-            token = f"queued:{run.id}"
+            token = f"queued:{uuid.uuid4()}"
             run.task_id = token
             run.save(update_fields=["task_id", "updated_at"])
             enqueued.append((str(run.id), token))
@@ -82,22 +97,7 @@ def dispatch_pending_runs() -> int:
         if not enqueued:
             return 0
 
-        def _enqueue_reserved() -> None:
-            for run_id, token in enqueued:
-                task_ref = _enqueue_task(run_agent_task, run_id)
-                task_id = _extract_task_id(task_ref)
-                if task_id:
-                    AgentRun.objects.filter(id=run_id, task_id=token).update(
-                        task_id=task_id,
-                        updated_at=timezone.now(),
-                    )
-                else:
-                    AgentRun.objects.filter(id=run_id, task_id=token).update(
-                        task_id="",
-                        updated_at=timezone.now(),
-                    )
-
-        transaction.on_commit(_enqueue_reserved)
+        transaction.on_commit(lambda: _enqueue_reserved_runs(enqueued))
         return len(enqueued)
 
 
@@ -109,6 +109,7 @@ def execute_run(run_id: str) -> None:
         AgentRun.objects.filter(id=run_id, status=AgentRun.Status.PENDING).update(
             task_id="", updated_at=timezone.now()
         )
+        dispatch_pending_runs()
         return
 
     agent_run_started.send(sender=AgentRun, run=run)

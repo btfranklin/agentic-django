@@ -10,7 +10,7 @@
 
 ## Ownership and access
 
-- All run/session queries must be filtered by `owner` to prevent cross-user access.
+- Request-facing run/session queries must filter by `owner` to prevent cross-user access.
 - Session keys are scoped per user.
 
 ## Abuse protection
@@ -33,3 +33,12 @@ Cache settings do not affect request limits.
 ## Tool safety
 
 - Avoid exposing powerful tools to untrusted input without allowlists or validation.
+
+## Submission and admin permissions
+
+The built-in create view applies request limits and payload validation. Custom
+callers must perform these checks before `submit_agent_run`. The service owns
+record creation and queue submission; it does not authenticate callers.
+
+Admin requeue requires run change permission. Purge requires run delete
+permission. View permission alone allows neither action.

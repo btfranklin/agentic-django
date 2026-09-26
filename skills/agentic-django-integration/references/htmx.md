@@ -14,40 +14,38 @@ form fields can contain JSON.
 <form
   hx-post="/agents/runs/"
   hx-target="#run-container"
-  hx-swap="outerHTML"
+  hx-swap="innerHTML"
+  method="post"
 >
+  {% csrf_token %}
   <input type="hidden" name="session_key" value="{{ session_key }}" />
   <textarea name="input"></textarea>
   <button type="submit">Run</button>
 </form>
+<div id="run-container"></div>
 ```
 
 ## Polling fragment
 
 ```html
-<div
-  id="run-container-{{ run.id }}"
-  data-status="{{ run.status }}"
-  hx-get="{% url 'agents:run-fragment' run.id %}"
-  hx-trigger="load delay:1s, every 2s"
-  hx-target="#run-container-{{ run.id }}"
-  hx-swap="outerHTML"
-  hx-on::afterSwap="if (this.dataset.status === 'completed' || this.dataset.status === 'failed') { this.removeAttribute('hx-get'); this.removeAttribute('hx-trigger'); }"
->
-  {% load agentic_django_tags %}
-  {% agent_run_fragment run %}
-</div>
+{% load agentic_django_tags %}
+{% agent_run_fragment run %}
 ```
+
+The tag renders the complete run container. Pending and running fragments have
+polling attributes. Terminal HTMX responses use `HttpResponseStopPolling` and
+omit those attributes. No inline JavaScript is required to stop polling.
 
 ## Server-driven coordination
 
 Use `HX-Trigger` to update dependent panels (conversation, logs, etc.) whenever the run fragment refreshes. This avoids separate polling loops that can restart unexpectedly.
 
 ```python
-# views.py
+from django.shortcuts import render
+from django_htmx.http import trigger_client_event
+
 response = render(request, "agentic_django/partials/run_fragment.html", {"run": run})
-response["HX-Trigger"] = "run-update"
-return response
+return trigger_client_event(response, "run-update")
 ```
 
 ```html
@@ -56,7 +54,7 @@ return response
      hx-trigger="run-update from:body"
      hx-target="#conversation-contents"
      hx-swap="innerHTML">
-  ...
+  <div id="conversation-contents"></div>
 </div>
 ```
 
@@ -69,3 +67,6 @@ If your project defines `templates/agentic_django/...`, Django will use those fi
 - **Multiple polling loops**: avoid combining HTMX polling, custom JS timers, and `hx-trigger="load, every ..."` on the same panel. Pick a single source of truth.
 - **Swapped targets disappear**: if the element with `hx-target` gets replaced, later requests may fail silently. Keep a stable wrapper element.
 - **HTMX error swaps**: HTMX does not swap on 4xx/5xx by default; return a 200 with error HTML for fragment updates.
+
+The `agent_conversation` tag and session history endpoint both read the configured
+session backend. Add `django_htmx` and its middleware as shown in the README.

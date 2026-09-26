@@ -52,3 +52,8 @@ A limit of zero returns no items. Invalid and negative limits return HTTP 400.
 Semantic events are saved as they arrive. A later stream failure does not discard
 events that were already received. Signals run after the database write and can
 use the synchronous Django ORM.
+
+The default serializer skips raw token events. Custom serializers control their
+own filtering. Event receivers use robust signal dispatch: receiver exceptions
+are logged, and other receivers still run. This behavior differs from
+`agent_session_created`, which uses normal signal dispatch.

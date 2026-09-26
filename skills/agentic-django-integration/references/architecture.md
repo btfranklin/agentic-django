@@ -1,9 +1,11 @@
 # Architecture Overview
 
-Agentic Django runs agent work outside the request/response cycle using Django tasks.
+Agentic Django submits work through Django tasks. A background backend runs it
+in a worker. The immediate backend runs it in the submitting process.
 The high-level flow is:
 
-1. Submission view validates input and creates an `AgentRun` row with `status="pending"`.
+1. The submission view validates input and calls `submit_agent_run`, which creates
+   an `AgentRun` row with `status="pending"`.
 2. The run is enqueued via Django tasks (Immediate or RQ backend).
 3. The task executes `Runner.run` (async; wrapped with `async_to_sync`) or
    `Runner.run_streamed` (sync return) when events are enabled.
@@ -14,15 +16,16 @@ The high-level flow is:
 
 When events are enabled, the runner returns a `RunResultStreaming` object.
 Events are consumed via the async generator `RunResultStreaming.stream_events()`.
-Only semantic events are stored; raw response token events are skipped.
+The default event serializer stores semantic events and skips raw token events.
 
 ## Concurrency and dispatch
 
 Pending runs are dispatched up to `AGENTIC_DJANGO_CONCURRENCY_LIMIT`.
 Dispatch uses database locking to avoid race conditions and then enqueues tasks
 after commit to keep transactions short. Only one run per session executes at a
-time, so each new turn reads the previous completed turn. Different sessions can
-execute concurrently.
+time. Each run reads the history present when it starts. This does not guarantee
+submission-order execution across queue workers. Different sessions can execute
+concurrently.
 
 ## Run recovery
 
@@ -36,3 +39,16 @@ queue. See [operations](operations.md) for the procedure.
 The conversation tag and history endpoint read the configured session backend.
 Cleanup applies only to local records. The host app owns external history
 retention.
+
+## Custom submission
+
+Use `agentic_django.services.submit_agent_run` with keyword arguments `owner`,
+`session_key`, `agent_key`, `input_payload`, and optional `metadata`. Authenticate
+the caller, validate input, select an allowed agent, and apply request limits
+before this call. The service owns session locking, backend initialization,
+local record creation, and enqueue after commit. Use this service instead of
+copying the database transaction into a custom view.
+
+An outer rollback discards local records and the enqueue callback. External
+backend effects are outside that transaction. Queue failure after commit leaves
+the run stored for retry. Query the run status for its current state.

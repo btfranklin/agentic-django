@@ -4,17 +4,19 @@
 
 - Identified by `session_key` and scoped to `owner`.
 - Stores metadata and timestamps.
-- Conversation history is stored in `AgentSessionItem` rows ordered by `sequence`.
+- The default backend stores history in `AgentSessionItem` rows ordered by `sequence`.
 
 ## AgentSessionItem
 
-- `sequence` is monotonic per session; ordering is enforced by DB constraints.
+- `sequence` is unique within a session. Reads use sequence order.
+- Appends start after the highest remaining sequence. Removing the last item or
+  clearing history can allow sequence values to be reused.
 - `payload` is JSON-safe and normalized via the session item serializer
   (default: `SessionItemSerializer`).
 
 ## AgentRun
 
-- Represents a single `Runner.run` invocation.
+- Tracks one submitted run, executed with `Runner.run` or `Runner.run_streamed`.
 - Tracks `status` (`pending`, `running`, `completed`, `failed`), timestamps, and
   execution metadata such as `task_id`.
 - Stores `final_output`, `raw_responses`, and `last_response_id`.

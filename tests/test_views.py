@@ -65,7 +65,7 @@ def test_create_run_json_success(
         lambda: {"default": lambda: object()},
     )
     monkeypatch.setattr(
-        "agentic_django.views.enqueue_agent_run",
+        "agentic_django.services.enqueue_agent_run",
         lambda run_id: None,
     )
 
@@ -91,7 +91,7 @@ def test_create_run_uses_session_backend(
         lambda: {"default": lambda: object()},
     )
     monkeypatch.setattr(
-        "agentic_django.views.enqueue_agent_run",
+        "agentic_django.services.enqueue_agent_run",
         lambda run_id: None,
     )
     RecordingSession.called = False
@@ -122,7 +122,7 @@ def test_create_run_htmx(
         lambda: {"default": lambda: object()},
     )
     monkeypatch.setattr(
-        "agentic_django.views.enqueue_agent_run",
+        "agentic_django.services.enqueue_agent_run",
         lambda run_id: None,
     )
 
@@ -168,7 +168,7 @@ def test_create_run_rate_limited(
         lambda: {"default": lambda: object()},
     )
     monkeypatch.setattr(
-        "agentic_django.views.enqueue_agent_run",
+        "agentic_django.services.enqueue_agent_run",
         lambda run_id: None,
     )
 
@@ -383,7 +383,7 @@ def test_create_run_preserves_input_text(
 ) -> None:
     client.force_login(user)
     monkeypatch.setattr(
-        "agentic_django.views.enqueue_agent_run", lambda run_id: None,
+        "agentic_django.services.enqueue_agent_run", lambda run_id: None,
     )
     payload = {"session_key": "thread", "input": text}
     if as_json:
@@ -402,7 +402,7 @@ def test_create_run_preserves_json_context_text(
 ) -> None:
     client.force_login(user)
     monkeypatch.setattr(
-        "agentic_django.views.enqueue_agent_run", lambda run_id: None,
+        "agentic_django.services.enqueue_agent_run", lambda run_id: None,
     )
     payload = {"session_key": "thread", "input": "hello", "context": "123"}
     response = client.post(
@@ -437,7 +437,7 @@ def test_created_session_key_can_retrieve_history(
 ) -> None:
     client.force_login(user)
     monkeypatch.setattr(
-        "agentic_django.views.enqueue_agent_run", lambda run_id: None,
+        "agentic_django.services.enqueue_agent_run", lambda run_id: None,
     )
     response = client.post(
         "/runs/", data={"session_key": session_key, "input": "hello"},

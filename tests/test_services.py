@@ -10,7 +10,8 @@ from django.utils import timezone
 from agentic_django.models import AgentEvent, AgentRun, AgentSession
 from agentic_django.services import (
     _build_run_options,
-    _send_event_signals,
+    _persist_event,
+    submit_agent_run,
     dispatch_pending_runs,
     execute_run,
 )
@@ -178,7 +179,7 @@ def test_dispatch_pending_runs(monkeypatch: pytest.MonkeyPatch, user: Any) -> No
 
 
 @pytest.mark.django_db()
-def test_send_event_signals(user: Any) -> None:
+def test_persist_event_notifies_receivers_after_save(user: Any) -> None:
     session = AgentSession.objects.create(session_key="thread", owner=user)
     run = AgentRun.objects.create(
         session=session,
@@ -197,16 +198,26 @@ def test_send_event_signals(user: Any) -> None:
     received: list[dict[str, Any]] = []
 
     def receiver(sender: Any, **kwargs: Any) -> None:
+        assert sender is AgentEvent
+        assert AgentEvent.objects.get(pk=kwargs["event"].pk).payload == event.payload
         received.append(kwargs)
 
+    def broken_receiver(sender: Any, **kwargs: Any) -> None:
+        raise RuntimeError("notification failed")
+
+    agent_run_event.connect(broken_receiver, weak=False)
     agent_run_event.connect(receiver, weak=False)
     try:
-        _send_event_signals(run, [event])
+        _persist_event(run, event)
     finally:
         agent_run_event.disconnect(receiver)
+        agent_run_event.disconnect(broken_receiver)
 
-    assert received
+    assert received[0]["run"] == run
+    assert received[0]["event"] == event
+    assert received[0]["sequence"] == 1
     assert received[0]["event_type"] == "tool_called"
+    assert received[0]["payload"] == event.payload
 
 
 @pytest.mark.django_db(transaction=True)
@@ -578,3 +589,125 @@ def test_pending_recovery_preserves_unreserved_work(user: Any) -> None:
     run.refresh_from_db()
     assert run.status == AgentRun.Status.PENDING
     assert run.task_id == ""
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize('backend', [
+    'agentic_django.sessions.DatabaseSession', 'tests.support.RecordingSession',
+])
+def test_submit_run_initializes_backend_and_notifies_once(
+    user: Any, monkeypatch: pytest.MonkeyPatch, backend: str,
+) -> None:
+    from agentic_django.signals import agent_session_created
+    from tests.support import RecordingSession
+
+    created = []
+    sent = []
+    RecordingSession.called = False
+
+    def receiver(sender: Any, **kwargs: Any) -> None:
+        created.append(kwargs['session'].pk)
+
+    def enqueue(run_id: str) -> DummyTaskResult:
+        from django.db import connection
+        assert not connection.in_atomic_block
+        assert AgentRun.objects.filter(pk=run_id).exists()
+        sent.append(run_id)
+        return DummyTaskResult('submitted')
+
+    _replace_run_task(monkeypatch, enqueue)
+    metadata = {'context': {'topic': 'test'}, 'run_options': {'max_turns': 2}}
+    agent_session_created.connect(receiver, weak=False)
+    try:
+        with override_settings(AGENTIC_DJANGO_SESSION_BACKEND=backend):
+            run = submit_agent_run(
+                owner=user, session_key='submission', agent_key='default',
+                input_payload='hello', metadata=metadata,
+            )
+    finally:
+        agent_session_created.disconnect(receiver)
+
+    run.refresh_from_db()
+    assert run.owner == run.session.owner == user
+    assert run.input_payload == 'hello'
+    assert run.metadata == metadata
+    assert run.status == AgentRun.Status.PENDING
+    assert run.task_id == 'submitted'
+    assert created == [run.session_id]
+    assert sent == [str(run.pk)]
+    if backend == 'tests.support.RecordingSession':
+        assert RecordingSession.called
+
+
+@pytest.mark.django_db(transaction=True)
+def test_submit_run_obeys_outer_transaction_commit_and_rollback(
+    user: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from django.db import transaction
+
+    sent = []
+
+    def enqueue(run_id: str) -> DummyTaskResult:
+        sent.append(run_id)
+        return DummyTaskResult('submitted')
+
+    _replace_run_task(monkeypatch, enqueue)
+    with transaction.atomic():
+        run = submit_agent_run(
+            owner=user, session_key='committed', agent_key='default',
+            input_payload='hello',
+        )
+        assert sent == []
+    assert sent == [str(run.pk)]
+
+    with pytest.raises(RuntimeError, match='rollback'), transaction.atomic():
+        submit_agent_run(
+            owner=user, session_key='rolled-back', agent_key='default',
+            input_payload='hello',
+        )
+        raise RuntimeError('rollback')
+    assert sent == [str(run.pk)]
+    assert not AgentSession.objects.filter(session_key='rolled-back').exists()
+    assert AgentRun.objects.count() == 1
+
+
+@pytest.mark.django_db()
+def test_submit_run_backend_failure_rolls_back_local_records(
+    user: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def failing_backend(session_key: str, owner: Any) -> None:
+        AgentSession.objects.create(session_key=session_key, owner=owner)
+        raise RuntimeError('backend failed')
+
+    monkeypatch.setattr('agentic_django.services.get_session', failing_backend)
+    with pytest.raises(RuntimeError, match='backend failed'):
+        submit_agent_run(
+            owner=user, session_key='failed', agent_key='default', input_payload='hi',
+        )
+    assert not AgentSession.objects.exists()
+    assert not AgentRun.objects.exists()
+
+
+@pytest.mark.django_db()
+def test_submit_run_reuses_only_the_owners_session(user: Any) -> None:
+    from datetime import timedelta
+    from django.contrib.auth import get_user_model
+
+    other = get_user_model().objects.create_user(username='other-submitter')
+    own_session = AgentSession.objects.create(owner=user, session_key='shared-key')
+    other_session = AgentSession.objects.create(owner=other, session_key='shared-key')
+    old_time = timezone.now() - timedelta(days=90)
+    AgentSession.objects.update(updated_at=old_time)
+    own_session.items.create(sequence=1, payload={'content': 'existing history'})
+
+    run = submit_agent_run(
+        owner=user, session_key='shared-key', agent_key='default', input_payload='hi',
+    )
+
+    own_session.refresh_from_db()
+    other_session.refresh_from_db()
+    assert run.session_id == own_session.pk
+    assert own_session.updated_at > old_time
+    assert own_session.items.get().payload == {'content': 'existing history'}
+    assert other_session.updated_at == old_time
+    assert not other_session.runs.exists()

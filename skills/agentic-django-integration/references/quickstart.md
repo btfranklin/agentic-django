@@ -1,6 +1,6 @@
 # Agentic Django Quickstart
 
-Requires Python 3.12+ and Django 6.x.
+Requires Python 3.12+ and Django 6.1 or later. The current target is Django 6.x.
 
 Start with an existing Django project that has authentication and session
 middleware configured. Replace `my_project` below with your project package name.

@@ -5,6 +5,29 @@
 > [docs/architecture.md](docs/architecture.md) and
 > [docs/quality.md](docs/quality.md).
 
+## Current implementation differences
+
+The proposal below is preserved as history, not as setup instructions. Use the
+README and current architecture map for implementation details:
+
+- Submission now uses `submit_agent_run`; views own HTTP validation.
+- Tasks use `django-tasks`. RQ uses the separate `django-tasks-rq` package.
+  The immediate backend runs in the submitting process.
+- Startup recovery was removed. Recovery is manual; `--include-pending` can
+  include abandoned queue reservations after workers and submissions stop.
+- Session writes acquire a database write lock before reading history. Cleanup
+  locks and rechecks candidates, including child runs for session deletion.
+- The SDK session methods belong to `DatabaseSession`, not the model.
+- Events use a string event type, not a database enum. The event setting controls
+  persistence and endpoint access; migrations still create the event table.
+- Request `config` is merged into runner keyword options. It is not converted
+  from JSON into a `RunConfig` object.
+- The package ships polling only. Its fragment is
+  `agentic_django/partials/run_fragment.html`; it displays run status.
+- Cancellation and general middleware-like pipeline hooks described below are
+  design goals, not implemented package contracts.
+- Current dependency requirements are in `pyproject.toml` (Django 6.1 minimum).
+
 ## Overview
 
 This document captures the goals, guiding principles, and detailed design for a reusable Django package that layers on top of the OpenAI Agents SDK. The package targets server environments such as Sevalla where the application runs under ASGI and should orchestrate long-lived agent runs without Celery-style infrastructure, leaning on Django 6’s built-in tasks framework where background execution is required.

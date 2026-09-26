@@ -18,7 +18,7 @@ from agents import Runner
 from agents.stream_events import RunItemStreamEvent, StreamEvent
 
 from agentic_django.conf import get_concurrency_limit, get_settings
-from agentic_django.models import AgentEvent, AgentRun, AgentRunLock
+from agentic_django.models import AgentEvent, AgentRun, AgentRunLock, AgentSession
 from agentic_django.registry import get_agent
 from agentic_django.serializers import JsonSerializer
 from agentic_django.sessions import get_session
@@ -27,9 +27,42 @@ from agentic_django.signals import (
     agent_run_event,
     agent_run_failed,
     agent_run_started,
+    agent_session_created,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def submit_agent_run(
+    *,
+    owner: Any,
+    session_key: str,
+    agent_key: str,
+    input_payload: str | list[Any],
+    metadata: dict[str, Any] | None = None,
+) -> AgentRun:
+    """Create a run from validated input and enqueue it after commit."""
+    with transaction.atomic():
+        # Lock session reuse before cleanup can check its age and contents.
+        AgentSession.objects.filter(
+            session_key=session_key, owner=owner,
+        ).update(updated_at=timezone.now())
+        # Initialize the configured backend before creating the local run.
+        get_session(session_key, owner)
+        session, created = AgentSession.objects.get_or_create(
+            session_key=session_key, owner=owner,
+        )
+        if created:
+            agent_session_created.send(sender=AgentSession, session=session)
+        run = AgentRun.objects.create(
+            session=session,
+            owner=owner,
+            agent_key=agent_key,
+            input_payload=input_payload,
+            metadata=metadata if metadata is not None else {},
+        )
+        enqueue_agent_run(str(run.id))
+    return run
 
 
 def enqueue_agent_run(run_id: str) -> None:
@@ -294,7 +327,14 @@ async def _consume_stream_events(
 
 def _persist_event(run: AgentRun, event: AgentEvent) -> None:
     event.save()
-    _send_event_signals(run, [event])
+    agent_run_event.send_robust(
+        sender=AgentEvent,
+        run=run,
+        event=event,
+        sequence=event.sequence,
+        event_type=event.event_type,
+        payload=event.payload,
+    )
 
 
 def _serialize_event(
@@ -324,18 +364,6 @@ def _next_event_sequence(run: AgentRun) -> int:
         .get("max_sequence")
     )
     return (last_sequence or 0) + 1
-
-
-def _send_event_signals(run: AgentRun, events: list[AgentEvent]) -> None:
-    for event in events:
-        agent_run_event.send_robust(
-            sender=AgentEvent,
-            run=run,
-            event=event,
-            sequence=event.sequence,
-            event_type=event.event_type,
-            payload=event.payload,
-        )
 
 
 def recover_stuck_runs(mode: str, *, include_pending: bool = False) -> int:

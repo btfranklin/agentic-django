@@ -18,6 +18,9 @@ first, then the full pytest suite.
 - Keep tests in `tests/` with `test_*.py` modules.
 - Keep the suite offline and deterministic. Mock SDK/network behavior instead
   of making real API calls.
+- Keep isolated subprocess scenarios in `tests/scenarios/` as normal Python
+  modules. Launch them with `python -m` so Django setup remains isolated and
+  the scenario code remains covered by lint.
 - Cover owner-scoped request access, session ordering, event serialization,
   cleanup/recovery commands, and settings validation when those contracts
   change.

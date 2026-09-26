@@ -9,7 +9,7 @@ project lives in the sibling `agentic-django-example` repo.
 ## Requirements
 
 - Python 3.12+
-- Django 6.x
+- Django 6.1 or later; the current target is Django 6.x.
 
 ## Quickstart
 
@@ -143,35 +143,36 @@ custom state tracking.
 
 ## Usage examples
 
-Create a run from a view and enqueue it for background execution:
+Use `submit_agent_run` after authentication and input validation. It creates the
+run and submits the task after the database transaction commits:
 
 ```python
-from django.db import transaction
-from django.http import JsonResponse
-from django.utils import timezone
+from django.http import HttpRequest, JsonResponse
 
-from agentic_django.models import AgentRun, AgentSession
-from agentic_django.services import enqueue_agent_run
+from agentic_django.services import submit_agent_run
 
-def submit_run(request):
-    with transaction.atomic():
-        # Lock session reuse before cleanup checks its age and contents.
-        AgentSession.objects.filter(
-            owner=request.user, session_key=request.POST["session_key"],
-        ).update(updated_at=timezone.now())
-        session, _ = AgentSession.objects.get_or_create(
-            owner=request.user,
-            session_key=request.POST["session_key"],
-        )
-        run = AgentRun.objects.create(
-            session=session,
-            owner=request.user,
-            agent_key="default",
-            input_payload=request.POST["input"],
-        )
-        enqueue_agent_run(str(run.id))
+
+def submit_run(request: HttpRequest) -> JsonResponse:
+    run = submit_agent_run(
+        owner=request.user,
+        session_key=request.POST["session_key"],
+        agent_key="default",
+        input_payload=request.POST["input"],
+    )
     return JsonResponse({"run_id": str(run.id), "status": run.status})
 ```
+
+The service initializes the configured session backend, locks session reuse
+against cleanup, and creates the local session and run records. It accepts
+optional `metadata` for context and run options. The caller must validate the
+input, select an allowed agent key, and apply any request limits. The built-in
+creation view performs these HTTP checks before calling the same service.
+
+An outer transaction delays enqueue until its commit. If it rolls back, the
+local records and queue callback are discarded. External backend effects cannot
+be rolled back by the database transaction. Queue submission can fail after
+commit; the run remains stored for retry. Read the status endpoint for the
+current run state, including when an immediate task backend is used.
 
 Check run status later from a UI or API client:
 
@@ -221,18 +222,12 @@ middleware.
 HTMX polling + coordinated updates:
 
 ```html
-<div
-  id="run-container-{{ run.id }}"
-  data-status="{{ run.status }}"
-  hx-get="{% url 'agents:run-fragment' run.id %}"
-  hx-trigger="load delay:1s, every 2s"
-  hx-target="#run-container-{{ run.id }}"
-  hx-swap="outerHTML"
->
-  {% load agentic_django_tags %}
-  {% agent_run_fragment run %}
-</div>
+{% load agentic_django_tags %}
+{% agent_run_fragment run %}
 ```
+
+The tag renders the complete run container and its polling attributes. Do not
+wrap it in another element with the same ID or polling attributes.
 
 The fragment endpoint returns `HttpResponseStopPolling` when a run reaches a
 terminal state, so HTMX swaps in the final HTML and stops polling without extra
@@ -257,7 +252,7 @@ return trigger_client_event(response, "run-update")
      hx-trigger="run-update from:body"
      hx-target="#conversation-contents"
      hx-swap="innerHTML">
-  ...
+  <div id="conversation-contents"></div>
 </div>
 ```
 
@@ -328,7 +323,7 @@ limit across workers, without a cache dependency. Run migrations before use.
 
 - RQ-backed tasks in a host project: `pdm add "agentic-django[rq]"`
 - RQ validation in this repository: `pdm install -G dev -G rq`
-- Postgres driver: `pdm install -G postgres`
+- Postgres driver in a host project: `pdm add "agentic-django[postgres]"`
 
 ## Event streaming (optional)
 
@@ -336,7 +331,7 @@ When `AGENTIC_DJANGO_ENABLE_EVENTS = True`, each agent run persists semantic eve
 (tool calls, tool outputs, message items). Poll for events with:
 
 ```
-GET /runs/<uuid:run_id>/events/?after=<sequence>&limit=<n>
+GET /agents/runs/<uuid:run_id>/events/?after=<sequence>&limit=<n>
 ```
 
 You can also subscribe to the Django signal `agent_run_event` to push UI updates

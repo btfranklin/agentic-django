@@ -5,8 +5,6 @@ import re
 from typing import Any
 
 from asgiref.sync import async_to_sync
-from django.db import transaction
-from django.utils import timezone
 from django.template.loader import render_to_string
 from django_htmx.http import HttpResponseStopPolling, trigger_client_event
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -18,8 +16,7 @@ from agentic_django.conf import get_settings, parse_rate_limit
 from agentic_django.models import AgentEvent, AgentRun, AgentSession
 from agentic_django.registry import get_agent_registry
 from agentic_django.rate_limits import admit_request
-from agentic_django.services import enqueue_agent_run
-from agentic_django.signals import agent_session_created
+from agentic_django.services import submit_agent_run
 from agentic_django.sessions import get_session
 
 RUN_UPDATE_TRIGGER = "run-update"
@@ -77,30 +74,13 @@ class AgentRunCreateView(LoginRequiredMixin, View):
         if context_payload is not None:
             metadata["context"] = context_payload
 
-        with transaction.atomic():
-            # Lock session reuse before cleanup can check its age and contents.
-            AgentSession.objects.filter(
-                session_key=session_key, owner=request.user,
-            ).update(updated_at=timezone.now())
-            # Initialize the configured session backend before creating the run.
-            get_session(session_key, request.user)
-            session, created = AgentSession.objects.get_or_create(
-                session_key=session_key,
-                owner=request.user,
-            )
-            if created:
-                agent_session_created.send(sender=AgentSession, session=session)
-
-            run = AgentRun.objects.create(
-                session=session,
-                owner=request.user,
-                agent_key=agent_key,
-                status=AgentRun.Status.PENDING,
-                input_payload=input_payload,
-                metadata=metadata,
-                task_id="",
-            )
-            enqueue_agent_run(str(run.id))
+        run = submit_agent_run(
+            owner=request.user,
+            session_key=session_key,
+            agent_key=agent_key,
+            input_payload=input_payload,
+            metadata=metadata,
+        )
 
         if _is_htmx(request):
             return _render_run_fragment_response(request, run)

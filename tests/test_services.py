@@ -491,3 +491,90 @@ def test_failure_notification_preserves_original_error(
         agent_run_failed.disconnect(broken)
     run.refresh_from_db()
     assert run.status == AgentRun.Status.FAILED
+
+
+@pytest.mark.django_db(transaction=True)
+def test_recovery_leaves_pending_reservations_unless_requested(user: Any) -> None:
+    from agentic_django.services import recover_stuck_runs
+
+    session = AgentSession.objects.create(session_key="reserved", owner=user)
+    run = AgentRun.objects.create(
+        session=session, owner=user, agent_key="default", input_payload="hi",
+        task_id="queued:abandoned",
+    )
+    assert recover_stuck_runs("fail") == 0
+    run.refresh_from_db()
+    assert run.status == AgentRun.Status.PENDING
+    assert run.task_id == "queued:abandoned"
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("mode", ["fail", "requeue"])
+@pytest.mark.parametrize("task_id", ["queued:abandoned", "accepted-task-id"])
+def test_recovery_command_handles_abandoned_pending_reservations(
+    monkeypatch: pytest.MonkeyPatch, user: Any, mode: str, task_id: str
+) -> None:
+    from django.core.management import call_command
+
+    session = AgentSession.objects.create(session_key="reserved", owner=user)
+    run = AgentRun.objects.create(
+        session=session, owner=user, agent_key="default", input_payload="hi",
+        task_id=task_id,
+    )
+    sent = []
+
+    def enqueue(run_id: str) -> DummyTaskResult:
+        sent.append(run_id)
+        return DummyTaskResult("replacement")
+
+    _replace_run_task(monkeypatch, enqueue)
+    call_command("agentic_django_recover_runs", mode=mode, include_pending=True)
+    run.refresh_from_db()
+    if mode == "fail":
+        assert run.status == AgentRun.Status.FAILED
+        assert run.task_id == ""
+        assert run.finished_at is not None
+        assert sent == []
+    else:
+        assert run.status == AgentRun.Status.PENDING
+        assert run.task_id == "replacement"
+        assert sent == [str(run.id)]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_dispatch_limits_backlog_rows_read(
+    monkeypatch: pytest.MonkeyPatch, user: Any
+) -> None:
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    session = AgentSession.objects.create(session_key="backlog", owner=user)
+    AgentRun.objects.bulk_create([
+        AgentRun(session=session, owner=user, agent_key="default", input_payload="hi")
+        for _ in range(100)
+    ])
+    _replace_run_task(monkeypatch, lambda run_id: DummyTaskResult("accepted"))
+    with override_settings(AGENTIC_DJANGO_CONCURRENCY_LIMIT=2):
+        with CaptureQueriesContext(connection) as queries:
+            assert dispatch_pending_runs() == 1
+    # A session with a large backlog must not cause all pending rows to load.
+    pending_selects = [
+        query["sql"] for query in queries.captured_queries
+        if query["sql"].startswith("SELECT") and '"task_id" = ' in query["sql"]
+    ]
+    assert pending_selects
+    assert all("LIMIT 1" in query for query in pending_selects)
+
+
+@pytest.mark.django_db()
+def test_pending_recovery_preserves_unreserved_work(user: Any) -> None:
+    from agentic_django.services import recover_stuck_runs
+
+    session = AgentSession.objects.create(session_key="unreserved", owner=user)
+    run = AgentRun.objects.create(
+        session=session, owner=user, agent_key="default", input_payload="hi",
+    )
+    assert recover_stuck_runs("fail", include_pending=True) == 0
+    run.refresh_from_db()
+    assert run.status == AgentRun.Status.PENDING
+    assert run.task_id == ""

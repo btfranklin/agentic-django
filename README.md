@@ -146,23 +146,30 @@ custom state tracking.
 Create a run from a view and enqueue it for background execution:
 
 ```python
+from django.db import transaction
 from django.http import JsonResponse
+from django.utils import timezone
 
 from agentic_django.models import AgentRun, AgentSession
 from agentic_django.services import enqueue_agent_run
 
 def submit_run(request):
-    session, _ = AgentSession.objects.get_or_create(
-        owner=request.user,
-        session_key=request.POST["session_key"],
-    )
-    run = AgentRun.objects.create(
-        session=session,
-        owner=request.user,
-        agent_key="default",
-        input_payload=request.POST["input"],
-    )
-    enqueue_agent_run(str(run.id))
+    with transaction.atomic():
+        # Lock session reuse before cleanup checks its age and contents.
+        AgentSession.objects.filter(
+            owner=request.user, session_key=request.POST["session_key"],
+        ).update(updated_at=timezone.now())
+        session, _ = AgentSession.objects.get_or_create(
+            owner=request.user,
+            session_key=request.POST["session_key"],
+        )
+        run = AgentRun.objects.create(
+            session=session,
+            owner=request.user,
+            agent_key="default",
+            input_payload=request.POST["input"],
+        )
+        enqueue_agent_run(str(run.id))
     return JsonResponse({"run_id": str(run.id), "status": run.status})
 ```
 
@@ -269,7 +276,9 @@ already including it via the HTMX setup above, add it to your base template:
 ## Optional configuration
 
 After the quickstart works, configure run limits and a background backend in
-`settings.py` as needed. An RQ backend also needs Redis and a running RQ worker.
+`settings.py` as needed. Install the RQ extra with `pdm add "agentic-django[rq]"`.
+The RQ backend also needs Redis and a running RQ worker. Add both `django_rq` and
+`django_tasks_rq` to `INSTALLED_APPS`.
 
 ```python
 AGENTIC_DJANGO_DEFAULT_RUN_OPTIONS = {"max_turns": 6}
@@ -282,7 +291,10 @@ RQ_QUEUES = {
 }
 
 # Switch to RQ-backed tasks in production
-TASKS["default"]["BACKEND"] = "django_tasks.backends.rq.RQBackend"
+TASKS["default"] = {
+    "BACKEND": "django_tasks_rq.RQBackend",
+    "QUEUES": ["default"],
+}
 
 # Optional: enable event streaming persistence
 AGENTIC_DJANGO_ENABLE_EVENTS = True
@@ -303,12 +315,19 @@ AGENTIC_DJANGO_CLEANUP_POLICY = {
 }
 ```
 
+Start the worker with the task-specific job class:
+
+```bash
+pdm run python manage.py rqworker default --job-class django_tasks_rq.Job
+```
+
 Request limits use one database counter per user. Atomic updates enforce the
 limit across workers, without a cache dependency. Run migrations before use.
 
 ## Optional dependencies
 
-- RQ-backed tasks: `pdm install -G rq`
+- RQ-backed tasks in a host project: `pdm add "agentic-django[rq]"`
+- RQ validation in this repository: `pdm install -G dev -G rq`
 - Postgres driver: `pdm install -G postgres`
 
 ## Event streaming (optional)
@@ -332,6 +351,12 @@ python manage.py agentic_django_cleanup --dry-run
 python manage.py agentic_django_cleanup --events-days 14 --runs-days 60
 ```
 
+Cleanup affects local database records only. It does not inspect or remove
+history in an external session backend. `sessions_require_empty` checks local
+runs and items. Sessions with pending or running work are retained, including
+when nonempty cleanup is enabled. The host app must manage external history
+retention.
+
 Recover runs stuck in `running` after a restart:
 
 ```bash
@@ -343,6 +368,15 @@ Recovery is manual. Stop all run workers and pause submissions before recovery.
 A new process must not reset work that another worker still executes. The
 `AGENTIC_DJANGO_STARTUP_RECOVERY` setting has been removed. Requeue only when
 repeating the run and its tool actions is safe.
+
+If submission stopped after reserving a pending run, use `--include-pending`.
+This includes all pending runs with queue reservations or task IDs. Stop workers,
+pause submissions, and remove the affected old tasks from the queue first.
+Without this flag, recovery leaves pending reservations unchanged.
+
+```bash
+python manage.py agentic_django_recover_runs --mode=requeue --include-pending
+```
 
 ## Security notes
 

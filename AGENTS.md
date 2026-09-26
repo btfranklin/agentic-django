@@ -21,7 +21,7 @@ belongs in the docs it links to.
 
 ## Commands
 
-- Install dev dependencies: `pdm install --group dev`
+- Install dev and RQ test dependencies: `pdm install --group dev --group rq`
 - Lint: `pdm run lint`
 - Test: `pdm run test`
 - Full local validation: `pdm run check`

@@ -50,8 +50,8 @@ dev = [
 
 [project.optional-dependencies]
 rq = [
-    "django-tasks[rq]>=0.12.0",
     "redis>=8.1.0",
+    "django-tasks-rq>=0.12.0",
 ]
 postgres = [
     "psycopg[binary]>=3.3.4",

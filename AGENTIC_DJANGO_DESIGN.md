@@ -206,7 +206,7 @@ Expose primary settings with sensible defaults:
 - `AGENTIC_DJANGO_MAX_INPUT_BYTES`: hard cap on request body size for run creation.
 - `AGENTIC_DJANGO_MAX_INPUT_ITEMS`: cap on list-style inputs to avoid abuse.
 - `AGENTIC_DJANGO_STARTUP_RECOVERY`: how to handle `running` runs on startup (`ignore`, `fail`, `requeue`; default `requeue`).
-- `TASKS`: Django tasks backend configuration; in production demos, use `django_tasks.backends.rq.RQBackend` with `django-rq`.
+- `TASKS`: Django tasks backend configuration; in production demos, use `django_tasks_rq.RQBackend` with the separate `django-tasks-rq` package.
 
 Settings should be documented and validated at startup.
 

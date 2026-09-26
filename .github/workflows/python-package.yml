@@ -30,7 +30,7 @@ jobs:
                   cache-dependency-path: pdm.lock
             - name: Install dependencies
               run: |
-                  pdm install --group dev
+                  pdm install --group dev --group rq
             - name: Lint with ruff
               run: |
                   pdm run ruff check src tests --statistics

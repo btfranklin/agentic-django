@@ -5,6 +5,8 @@ import re
 from typing import Any
 
 from asgiref.sync import async_to_sync
+from django.db import transaction
+from django.utils import timezone
 from django.template.loader import render_to_string
 from django_htmx.http import HttpResponseStopPolling, trigger_client_event
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -67,15 +69,6 @@ class AgentRunCreateView(LoginRequiredMixin, View):
         if agent_key not in registry:
             return JsonResponse({"error": "Unknown agent_key"}, status=400)
 
-        # Initialize the configured session backend before creating the run.
-        get_session(session_key, request.user)
-        session, created = AgentSession.objects.get_or_create(
-            session_key=session_key,
-            owner=request.user,
-        )
-        if created:
-            agent_session_created.send(sender=AgentSession, session=session)
-
         metadata: dict[str, Any] = {}
         config_payload = payload.get("config")
         if isinstance(config_payload, dict):
@@ -84,16 +77,30 @@ class AgentRunCreateView(LoginRequiredMixin, View):
         if context_payload is not None:
             metadata["context"] = context_payload
 
-        run = AgentRun.objects.create(
-            session=session,
-            owner=request.user,
-            agent_key=agent_key,
-            status=AgentRun.Status.PENDING,
-            input_payload=input_payload,
-            metadata=metadata,
-            task_id="",
-        )
-        enqueue_agent_run(str(run.id))
+        with transaction.atomic():
+            # Lock session reuse before cleanup can check its age and contents.
+            AgentSession.objects.filter(
+                session_key=session_key, owner=request.user,
+            ).update(updated_at=timezone.now())
+            # Initialize the configured session backend before creating the run.
+            get_session(session_key, request.user)
+            session, created = AgentSession.objects.get_or_create(
+                session_key=session_key,
+                owner=request.user,
+            )
+            if created:
+                agent_session_created.send(sender=AgentSession, session=session)
+
+            run = AgentRun.objects.create(
+                session=session,
+                owner=request.user,
+                agent_key=agent_key,
+                status=AgentRun.Status.PENDING,
+                input_payload=input_payload,
+                metadata=metadata,
+                task_id="",
+            )
+            enqueue_agent_run(str(run.id))
 
         if _is_htmx(request):
             return _render_run_fragment_response(request, run)

@@ -38,7 +38,7 @@ class AgentRunAdmin(admin.ModelAdmin):
     inlines = [AgentEventInline]
     actions = ["requeue_runs", "purge_runs"]
 
-    @admin.action(description="Requeue selected runs")
+    @admin.action(permissions=["change"], description="Requeue selected runs")
     def requeue_runs(self, request: HttpRequest, queryset: QuerySet[AgentRun]) -> None:
         runs = queryset.exclude(status=AgentRun.Status.RUNNING)
         run_ids = list(runs.values_list("id", flat=True))
@@ -61,7 +61,7 @@ class AgentRunAdmin(admin.ModelAdmin):
             f"Requeued {updated} runs. Skipped {skipped} running runs.",
         )
 
-    @admin.action(description="Purge selected runs")
+    @admin.action(permissions=["delete"], description="Purge selected runs")
     def purge_runs(self, request: HttpRequest, queryset: QuerySet[AgentRun]) -> None:
         total = queryset.count()
         queryset.delete()

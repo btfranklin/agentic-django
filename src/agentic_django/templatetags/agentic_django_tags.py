@@ -4,11 +4,13 @@ import json
 from typing import Any
 
 from django import template
+from asgiref.sync import async_to_sync
 from django.utils.html import escape
 from django.utils.safestring import mark_safe
 
-from agentic_django.models import AgentSession, AgentSessionItem
+from agentic_django.models import AgentSession
 from agentic_django.serializers import _to_jsonable
+from agentic_django.sessions import get_session
 
 register = template.Library()
 
@@ -20,8 +22,9 @@ def agent_run_fragment(run: Any) -> dict[str, Any]:
 
 @register.inclusion_tag("agentic_django/partials/conversation.html")
 def agent_conversation(session: AgentSession) -> dict[str, Any]:
-    items = AgentSessionItem.objects.filter(session=session).order_by("sequence")
-    return {"session": session, "items": items}
+    backend = get_session(session.session_key, session.owner)
+    items = async_to_sync(backend.get_items)()
+    return {"session": session, "items": [{"payload": item} for item in items]}
 
 
 @register.filter

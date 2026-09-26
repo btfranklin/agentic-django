@@ -18,7 +18,16 @@ class Command(BaseCommand):
             help="Recovery mode for running runs.",
         )
 
+        parser.add_argument(
+            "--include-pending",
+            action="store_true",
+            help=(
+                "Also recover pending runs with queue reservations. Stop workers "
+                "and submissions, and remove their old queued tasks first."
+            ),
+        )
+
     def handle(self, *args: Any, **options: Any) -> None:
         mode = options["mode"]
-        updated = recover_stuck_runs(mode)
+        updated = recover_stuck_runs(mode, include_pending=options["include_pending"])
         self.stdout.write(f"Recovered {updated} runs ({mode}).")

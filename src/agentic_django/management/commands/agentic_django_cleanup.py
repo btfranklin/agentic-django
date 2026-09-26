@@ -4,7 +4,8 @@ from datetime import timedelta
 from typing import Any
 
 from django.core.management.base import BaseCommand, CommandError
-from django.db.models import QuerySet
+from django.db import transaction
+from django.db.models import F, QuerySet
 from django.utils import timezone
 
 from agentic_django.conf import get_settings, normalize_cleanup_policy
@@ -42,8 +43,7 @@ class Command(BaseCommand):
         policy = self._apply_overrides(policy, options)
 
         if not any(
-            key in policy
-            for key in ("events_days", "runs_days", "sessions_days")
+            key in policy for key in ("events_days", "runs_days", "sessions_days")
         ):
             self.stdout.write("No cleanup policy configured; nothing to do.")
             return
@@ -78,13 +78,14 @@ class Command(BaseCommand):
 
         if "sessions_days" in policy:
             cutoff = now - timedelta(days=policy["sessions_days"])
-            sessions = AgentSession.objects.filter(updated_at__lt=cutoff)
+            sessions = AgentSession.objects.filter(updated_at__lt=cutoff).exclude(
+                runs__status__in=[AgentRun.Status.PENDING, AgentRun.Status.RUNNING]
+            )
             require_empty = policy.get("sessions_require_empty", True)
             if require_empty:
-                sessions = (
-                    sessions.filter(runs__isnull=True, items__isnull=True)
-                    .distinct()
-                )
+                sessions = sessions.filter(
+                    runs__isnull=True, items__isnull=True
+                ).distinct()
             count = self._delete_queryset(sessions, batch_size, dry_run)
             self.stdout.write(f"{prefix} {count} sessions.")
 
@@ -136,10 +137,32 @@ class Command(BaseCommand):
             return queryset.count()
         total = 0
         base = queryset.order_by("pk")
+        last_pk = None
         while True:
-            ids = list(base.values_list("pk", flat=True)[:batch_size])
+            candidates = base if last_pk is None else base.filter(pk__gt=last_pk)
+            ids = list(candidates.values_list("pk", flat=True)[:batch_size])
             if not ids:
                 break
-            base.model.objects.filter(pk__in=ids).delete()
-            total += len(ids)
+            last_pk = ids[-1]
+            with transaction.atomic(using=queryset.db):
+                rows = base.model.objects.using(queryset.db).filter(pk__in=ids)
+                # Write first so SQLite also locks before eligibility is read.
+                rows.update(**{base.model._meta.pk.name: F("pk")})
+                list(
+                    rows.select_for_update().order_by("pk").values_list("pk", flat=True)
+                )
+                if base.model is AgentSession:
+                    # Keep requeue from changing terminal runs during deletion.
+                    list(
+                        AgentRun.objects.using(queryset.db)
+                        .filter(session_id__in=ids)
+                        .order_by("pk")
+                        .select_for_update()
+                        .values_list("pk", flat=True)
+                    )
+                eligible_ids = list(
+                    base.filter(pk__in=ids).values_list("pk", flat=True)
+                )
+                _, counts = rows.filter(pk__in=eligible_ids).delete()
+                total += counts.get(base.model._meta.label, 0)
         return total

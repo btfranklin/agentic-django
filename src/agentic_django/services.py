@@ -10,7 +10,7 @@ from typing import Any
 from asgiref.sync import async_to_sync, sync_to_async
 from django.conf import settings as django_settings
 from django.db import connection, transaction
-from django.db.models import Max
+from django.db.models import Max, Q
 from django.utils import timezone
 from django.utils.module_loading import import_string
 
@@ -73,7 +73,7 @@ def dispatch_pending_runs() -> int:
         pending_runs = AgentRun.objects.filter(
             status=AgentRun.Status.PENDING,
             task_id="",
-        ).order_by("created_at")
+        ).order_by("created_at", "id")
         if connection.features.has_select_for_update_skip_locked:
             pending_runs = pending_runs.select_for_update(skip_locked=True)
         else:
@@ -82,16 +82,16 @@ def dispatch_pending_runs() -> int:
             AgentRun.objects.filter(status=AgentRun.Status.RUNNING)
             .values_list("session_id", flat=True)
         )
-        for run in pending_runs:
-            if run.session_id in active_sessions:
-                continue
+        while len(enqueued) < available:
+            # Fetch one eligible row per slot without loading the full backlog.
+            run = pending_runs.exclude(session_id__in=active_sessions).first()
+            if run is None:
+                break
             active_sessions.add(run.session_id)
             token = f"queued:{uuid.uuid4()}"
             run.task_id = token
             run.save(update_fields=["task_id", "updated_at"])
             enqueued.append((str(run.id), token))
-            if len(enqueued) == available:
-                break
 
         if not enqueued:
             return 0
@@ -338,11 +338,14 @@ def _send_event_signals(run: AgentRun, events: list[AgentEvent]) -> None:
         )
 
 
-def recover_stuck_runs(mode: str) -> int:
+def recover_stuck_runs(mode: str, *, include_pending: bool = False) -> int:
     if mode not in {"fail", "requeue"}:
         return 0
     with _dispatch_lock():
-        queryset = AgentRun.objects.filter(status=AgentRun.Status.RUNNING)
+        affected = Q(status=AgentRun.Status.RUNNING)
+        if include_pending:
+            affected |= Q(status=AgentRun.Status.PENDING) & ~Q(task_id="")
+        queryset = AgentRun.objects.filter(affected)
         if mode == "fail":
             updated = queryset.update(
                 status=AgentRun.Status.FAILED,

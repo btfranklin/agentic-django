@@ -506,3 +506,45 @@ def test_create_run_rejects_invalid_agent_key_type(
     assert response.status_code == 400
     assert response.json()["error"] == "agent_key must be a string"
     assert not AgentRun.objects.exists()
+
+
+@pytest.mark.django_db()
+@pytest.mark.parametrize('authenticated', [False, True])
+def test_endpoints_deny_access_to_other_owners(
+    client: Client, user: Any, authenticated: bool,
+) -> None:
+    from django.contrib.auth import get_user_model
+
+    owner = get_user_model().objects.create_user(username='private-owner')
+    session = AgentSession.objects.create(owner=owner, session_key='private')
+    session.items.create(sequence=1, payload={'content': 'private history'})
+    run = AgentRun.objects.create(
+        owner=owner, session=session, agent_key='default', input_payload='private',
+    )
+    AgentEvent.objects.create(run=run, sequence=1, event_type='message', payload={})
+    if authenticated:
+        client.force_login(user)
+    with override_settings(AGENTIC_DJANGO_ENABLE_EVENTS=True):
+        for url in (
+            f'/runs/{run.pk}/', f'/runs/{run.pk}/fragment/',
+            f'/runs/{run.pk}/events/', '/sessions/private/items/',
+        ):
+            response = client.get(url)
+            assert response.status_code == (404 if authenticated else 302)
+
+
+@pytest.mark.django_db()
+def test_anonymous_client_cannot_create_run(client: Client) -> None:
+    response = client.post('/runs/', {'session_key': 'private', 'input': 'hi'})
+    assert response.status_code == 302
+    assert not AgentRun.objects.exists()
+    assert not AgentSession.objects.exists()
+
+
+@pytest.mark.django_db()
+def test_run_creation_requires_csrf_token(user: Any) -> None:
+    client = Client(enforce_csrf_checks=True)
+    client.force_login(user)
+    response = client.post('/runs/', {'session_key': 'private', 'input': 'hi'})
+    assert response.status_code == 403
+    assert not AgentRun.objects.exists()

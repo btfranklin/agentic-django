@@ -27,4 +27,12 @@ execute concurrently.
 ## Run recovery
 
 Recovery is manual and requires stopped workers and paused submissions. Process
-startup does not change existing run status.
+startup does not change existing run status. To recover abandoned pending
+reservations, use `--include-pending` after removing affected old tasks from the
+queue. See [operations](operations.md) for the procedure.
+
+## Session data
+
+The conversation tag and history endpoint read the configured session backend.
+Cleanup applies only to local records. The host app owns external history
+retention.

@@ -108,7 +108,8 @@ reservation has a unique token. On queue failure, the helper releases the failed
 reservation and the unsent part of its batch. These runs remain eligible for the
 next dispatch. Completion or rejection by an immediate worker cannot restore an
 obsolete reservation. Submission uses the decorated Django task's `enqueue()`
-method and stores the returned `TaskResult.id`.
+method and stores the returned `TaskResult.id`. Dispatch selects one eligible
+row per free slot with a bounded query. It does not load the full pending queue.
 
 ## Session execution
 
@@ -127,6 +128,36 @@ constraint migration if a session has more than one running row.
 Recovery is an explicit maintenance operation. Stop workers and pause submissions
 before recovery. Process startup does not reset active runs. Requeue can repeat
 tool actions, so the operator must check that repetition is safe.
+
+By default, recovery handles running rows only. `--include-pending` also handles
+pending rows with a reservation or task ID. Use it after an interrupted queue
+submission. Remove affected old tasks from the queue before this operation;
+requeue clears the stored reservation and submits replacement work.
+
+## Cleanup and session reuse
+
+Cleanup selects candidate IDs in batches. Each batch locks its rows, then checks
+age, status, and emptiness again before deletion. Session batches also lock their
+child runs. Session cleanup retains pending and running work even when nonempty
+cleanup is enabled.
+
+Run creation touches the session in a transaction before it creates the run.
+History changes also write the parent session first. These writes serialize with
+cleanup on SQLite and on databases with row locks. Custom submission code must
+use the same order: write the session, read or create it, then create the run in
+the same transaction. Enqueue after commit.
+
+Retention applies only to local database records. For an external session
+backend, `sessions_require_empty` checks only local runs and items. Cleanup does
+not read or delete external history. The host app owns that retention policy.
+
+The conversation template tag and history endpoint both read the configured
+session backend. They pass the returned items to the same conversation template.
+
+## Admin permissions
+
+The requeue action requires run change permission. The purge action requires run
+delete permission. View permission alone does not permit either action.
 
 ## Current Limits
 

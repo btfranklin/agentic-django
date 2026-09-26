@@ -59,7 +59,11 @@ class DatabaseSession(SessionABC):
         serializer = _get_item_serializer()
         normalized = [serializer.serialize(item) for item in items]
         with transaction.atomic():
-            session = AgentSession.objects.select_for_update().get(id=self._session.id)
+            # Write first so SQLite also locks before reading history.
+            AgentSession.objects.filter(id=self._session.id).update(
+                updated_at=timezone.now(),
+            )
+            session = AgentSession.objects.get(id=self._session.id)
             last_item = (
                 AgentSessionItem.objects.filter(session=session)
                 .order_by("-sequence")
@@ -76,13 +80,15 @@ class DatabaseSession(SessionABC):
                     )
                 )
             AgentSessionItem.objects.bulk_create(batch)
-            session.updated_at = timezone.now()
-            session.save(update_fields=["updated_at"])
 
     def _pop_item(self) -> dict[str, Any] | None:
         serializer = _get_item_serializer()
         with transaction.atomic():
-            session = AgentSession.objects.select_for_update().get(id=self._session.id)
+            # Write first so SQLite also locks before reading history.
+            AgentSession.objects.filter(id=self._session.id).update(
+                updated_at=timezone.now(),
+            )
+            session = AgentSession.objects.get(id=self._session.id)
             last_item = (
                 AgentSessionItem.objects.filter(session=session)
                 .order_by("-sequence")
@@ -92,16 +98,16 @@ class DatabaseSession(SessionABC):
                 return None
             payload = last_item.payload
             last_item.delete()
-            session.updated_at = timezone.now()
-            session.save(update_fields=["updated_at"])
             return serializer.deserialize(payload)
 
     def _clear_session(self) -> None:
         with transaction.atomic():
-            session = AgentSession.objects.select_for_update().get(id=self._session.id)
+            # Write first so SQLite also locks before reading history.
+            AgentSession.objects.filter(id=self._session.id).update(
+                updated_at=timezone.now(),
+            )
+            session = AgentSession.objects.get(id=self._session.id)
             AgentSessionItem.objects.filter(session=session).delete()
-            session.updated_at = timezone.now()
-            session.save(update_fields=["updated_at"])
 
 
 def get_session(session_key: str, owner: Any) -> SessionABC:

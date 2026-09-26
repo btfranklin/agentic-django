@@ -4,8 +4,8 @@
 [metadata]
 groups = ["default", "dev", "postgres", "rq"]
 strategy = ["inherit_metadata"]
-lock_version = "4.5.0"
-content_hash = "sha256:ae98f834bc9a17dfdbf00dfc6ddd491aa35afe5811f4963dfeb499e6b27f940f"
+lock_version = "4.5.1"
+content_hash = "sha256:21ebe0781a7594158e186df4c23229cc6fb21837ab323bd0e72ce7eff7ab1542"
 
 [[metadata.targets]]
 requires_python = ">=3.12"
@@ -230,8 +230,7 @@ name = "click"
 version = "8.4.2"
 requires_python = ">=3.10"
 summary = "Composable command line interface toolkit"
-groups = ["default"]
-marker = "sys_platform != \"emscripten\" and python_version >= \"3.10\""
+groups = ["default", "rq"]
 dependencies = [
     "colorama; platform_system == \"Windows\"",
 ]
@@ -245,11 +244,34 @@ name = "colorama"
 version = "0.4.6"
 requires_python = "!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,!=3.5.*,!=3.6.*,>=2.7"
 summary = "Cross-platform colored terminal text."
-groups = ["default", "dev"]
-marker = "platform_system == \"Windows\" or sys_platform == \"win32\""
+groups = ["default", "dev", "rq"]
+marker = "sys_platform == \"win32\" or platform_system == \"Windows\""
 files = [
     {file = "colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6"},
     {file = "colorama-0.4.6.tar.gz", hash = "sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44"},
+]
+
+[[package]]
+name = "croniter"
+version = "6.2.4"
+requires_python = ">=3.9"
+summary = "croniter provides iteration for datetime object with cron like format"
+groups = ["rq"]
+dependencies = [
+    "python-dateutil",
+]
+files = [
+    {file = "croniter-6.2.4-py3-none-any.whl", hash = "sha256:8ef3d544107a5c05a150a2d78f8bf5a8eb9c5c4d93405a736b824109574e3f4d"},
+    {file = "croniter-6.2.4.tar.gz", hash = "sha256:fc124f751b1b04805c2a04b061898b436b45ab2320b045e1e052ea895de65189"},
+]
+
+[[package]]
+name = "crontab"
+version = "1.0.5"
+summary = "Parse and use crontab schedules in Python"
+groups = ["rq"]
+files = [
+    {file = "crontab-1.0.5.tar.gz", hash = "sha256:f80e01b4f07219763a9869f926dd17147278e7965a928089bca6d3dc80ae46d5"},
 ]
 
 [[package]]
@@ -349,6 +371,22 @@ files = [
 ]
 
 [[package]]
+name = "django-rq"
+version = "4.2.0"
+requires_python = ">=3.10"
+summary = "An app that provides django integration for RQ (Redis Queue)"
+groups = ["rq"]
+dependencies = [
+    "django>=4.2",
+    "redis>=3.5",
+    "rq>=2.6.1",
+]
+files = [
+    {file = "django_rq-4.2.0-py3-none-any.whl", hash = "sha256:1a41151c2830184939b043e541eca0667b635f3deddcd3452ce52348cf5bbc38"},
+    {file = "django_rq-4.2.0.tar.gz", hash = "sha256:b1d6546f9f5446987dcc1146b5f9bd7c4343ad38551f984aefa8e331309b5364"},
+]
+
+[[package]]
 name = "django-stubs-ext"
 version = "6.0.9"
 requires_python = ">=3.10"
@@ -380,18 +418,37 @@ files = [
 ]
 
 [[package]]
-name = "django-tasks"
+name = "django-tasks-rq"
 version = "0.12.0"
-extras = ["rq"]
 requires_python = ">=3.10"
-summary = "A backport of Django's built in Tasks framework"
+summary = "A Django Tasks backend which uses RQ as its underlying queue"
 groups = ["rq"]
 dependencies = [
-    "django-tasks==0.12.0",
+    "Django>=4.2",
+    "django-rq",
+    "django-stubs-ext",
+    "django-tasks>=0.12.0",
+    "rq-scheduler",
+    "rq>=2.5",
+    "typing-extensions",
 ]
 files = [
-    {file = "django_tasks-0.12.0-py3-none-any.whl", hash = "sha256:ffcc1d7bdfad3bc5ef9c2d498596c6546484c9ec6b182fb9709c691eb66a8709"},
-    {file = "django_tasks-0.12.0.tar.gz", hash = "sha256:58be66c1e487da32a3ce7320bd1949d0d1dc381b9004819f92591eb37fb2c1b8"},
+    {file = "django_tasks_rq-0.12.0-py3-none-any.whl", hash = "sha256:ece4131fb31bd0410a958504c4491e81a4987eddd654b9b26311af96a743ba0d"},
+    {file = "django_tasks_rq-0.12.0.tar.gz", hash = "sha256:84020a65d7b92d867f28d3002b4a6b07514eeda99b880ad91bb041d63e2191e0"},
+]
+
+[[package]]
+name = "freezegun"
+version = "1.5.5"
+requires_python = ">=3.8"
+summary = "Let your Python tests travel through time"
+groups = ["rq"]
+dependencies = [
+    "python-dateutil>=2.7",
+]
+files = [
+    {file = "freezegun-1.5.5-py3-none-any.whl", hash = "sha256:cd557f4a75cf074e84bc374249b9dd491eaeacd61376b9eb3c423282211619d2"},
+    {file = "freezegun-1.5.5.tar.gz", hash = "sha256:ac7742a6cc6c25a2c35e9292dfd554b897b517d2dec26891a2e8debf205cb94a"},
 ]
 
 [[package]]
@@ -946,6 +1003,20 @@ files = [
 ]
 
 [[package]]
+name = "python-dateutil"
+version = "2.9.0.post0"
+requires_python = "!=3.0.*,!=3.1.*,!=3.2.*,>=2.7"
+summary = "Extensions to the standard Python datetime module"
+groups = ["rq"]
+dependencies = [
+    "six>=1.5",
+]
+files = [
+    {file = "python-dateutil-2.9.0.post0.tar.gz", hash = "sha256:37dd54208da7e1cd875388217d5e00ebd4179249f90fb72437e91a35459a0ad3"},
+    {file = "python_dateutil-2.9.0.post0-py2.py3-none-any.whl", hash = "sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427"},
+]
+
+[[package]]
 name = "python-dotenv"
 version = "1.2.2"
 requires_python = ">=3.10"
@@ -1139,6 +1210,38 @@ files = [
 ]
 
 [[package]]
+name = "rq"
+version = "2.12.0"
+requires_python = ">=3.10"
+summary = "RQ is a simple, lightweight, library for creating background jobs, and processing them."
+groups = ["rq"]
+dependencies = [
+    "click>=5",
+    "croniter",
+    "redis!=6,>=3.5",
+]
+files = [
+    {file = "rq-2.12.0-py3-none-any.whl", hash = "sha256:97e349a00e9f2a18962102b3dca156cb5ce315d3ef38145e24ba9cabd16a9361"},
+    {file = "rq-2.12.0.tar.gz", hash = "sha256:78116d0c860f6285817b52d7d6d0b16a726372073ce8ea1d229732ce74ef9378"},
+]
+
+[[package]]
+name = "rq-scheduler"
+version = "0.14.0"
+summary = "Provides job scheduling capabilities to RQ (Redis Queue)"
+groups = ["rq"]
+dependencies = [
+    "crontab>=0.23.0",
+    "freezegun",
+    "python-dateutil",
+    "rq>=2",
+]
+files = [
+    {file = "rq-scheduler-0.14.0.tar.gz", hash = "sha256:2d5a14a1ab217f8693184ebaa1fe03838edcbc70b4f76572721c0b33058cd023"},
+    {file = "rq_scheduler-0.14.0-py2.py3-none-any.whl", hash = "sha256:d4ec221a3d8c11b3ff55e041f09d9af1e17f3253db737b6b97e86ab20fc3dc0d"},
+]
+
+[[package]]
 name = "ruff"
 version = "0.16.2"
 requires_python = ">=3.7"
@@ -1163,6 +1266,17 @@ files = [
     {file = "ruff-0.16.2-py3-none-win_amd64.whl", hash = "sha256:bcabe2f6d0fc7819f1431793005af4e4de7371927d037345bf941252b195b9fa"},
     {file = "ruff-0.16.2-py3-none-win_arm64.whl", hash = "sha256:d614e95cedf38a2053fd351c55b103ba30d017d61688fdbfd40ee0412852a99f"},
     {file = "ruff-0.16.2.tar.gz", hash = "sha256:c3d7828d12e8927a6fc65fe38e2c2541b9e762d360a1786d752cb1b8883b3c9c"},
+]
+
+[[package]]
+name = "six"
+version = "1.17.0"
+requires_python = "!=3.0.*,!=3.1.*,!=3.2.*,>=2.7"
+summary = "Python 2 and 3 compatibility utilities"
+groups = ["rq"]
+files = [
+    {file = "six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274"},
+    {file = "six-1.17.0.tar.gz", hash = "sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81"},
 ]
 
 [[package]]

@@ -20,8 +20,10 @@
 - Tracks `status` (`pending`, `running`, `completed`, `failed`), timestamps, and
   execution metadata such as `task_id`.
 - Stores `final_output`, `raw_responses`, and `last_response_id`.
+- Model validation requires the run owner to match the session owner.
 - The default serializer uses Pydantic JSON mode for model values. Dates,
-  times, decimals, and UUIDs are stored as JSON-compatible values.
+  times, decimals, and UUIDs are stored as JSON-compatible values. Nullable
+  fields retain their explicit `null` values.
 
 ## AgentEvent (optional)
 

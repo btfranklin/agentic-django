@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+from collections.abc import AsyncIterator
+from concurrent.futures import CancelledError
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from agents import Agent, Model, RunConfig, Runner
+from agents.items import ModelResponse, TResponseStreamEvent
+from agents.result import RunResultStreaming
 from django.test import override_settings
 from django.utils import timezone
 
@@ -15,7 +21,11 @@ from agentic_django.services import (
     dispatch_pending_runs,
     execute_run,
 )
-from agentic_django.signals import agent_run_event
+from agentic_django.signals import (
+    agent_run_completed,
+    agent_run_event,
+    agent_run_failed,
+)
 
 
 class DummyResult:
@@ -24,6 +34,7 @@ class DummyResult:
         self.raw_responses = [{"id": "resp"}]
         self.last_response_id = "resp"
         self.released = False
+        self.interruptions: list[Any] = []
 
     def release_agents(self) -> None:
         self.released = True
@@ -32,6 +43,176 @@ class DummyResult:
 class DummyTaskResult:
     def __init__(self, task_id: str) -> None:
         self.id = task_id
+
+
+@pytest.mark.django_db()
+@pytest.mark.parametrize("events", [False, True])
+def test_cancelled_sdk_model_marks_the_run_failed(
+    monkeypatch: pytest.MonkeyPatch, user: Any, events: bool,
+) -> None:
+    class CancelModel(Model):
+        async def get_response(self, *args: Any, **kwargs: Any) -> ModelResponse:
+            raise asyncio.CancelledError("model task cancelled")
+
+        async def stream_response(
+            self, *args: Any, **kwargs: Any,
+        ) -> AsyncIterator[TResponseStreamEvent]:
+            raise asyncio.CancelledError("model task cancelled")
+            yield
+
+    session = AgentSession.objects.create(session_key="cancelled", owner=user)
+    run = AgentRun.objects.create(
+        session=session, owner=user, agent_key="default", input_payload="hello",
+        task_id="cancelled-task",
+    )
+    model = CancelModel()
+    monkeypatch.setattr(
+        "agentic_django.services.get_agent",
+        lambda key: Agent(name="cancel", model=model),
+    )
+    results: list[RunResultStreaming] = []
+    original_runner = Runner.run_streamed
+
+    def capture(*args: Any, **kwargs: Any) -> RunResultStreaming:
+        result = original_runner(*args, **kwargs)
+        results.append(result)
+        return result
+
+    monkeypatch.setattr("agentic_django.services.Runner.run_streamed", capture)
+    completed: list[Any] = []
+    failed: list[Any] = []
+
+    def completed_receiver(sender: Any, **kwargs: Any) -> None:
+        completed.append(kwargs["run"].pk)
+
+    def failed_receiver(sender: Any, **kwargs: Any) -> None:
+        failed.append(kwargs["run"].pk)
+
+    agent_run_completed.connect(completed_receiver, weak=False)
+    agent_run_failed.connect(failed_receiver, weak=False)
+    try:
+        with override_settings(
+            AGENTIC_DJANGO_ENABLE_EVENTS=events,
+            AGENTIC_DJANGO_DEFAULT_RUN_OPTIONS={
+                "run_config": RunConfig(tracing_disabled=True),
+            },
+        ):
+            expected_error = RuntimeError if events else CancelledError
+            with pytest.raises(expected_error):
+                execute_run(str(run.pk))
+    finally:
+        agent_run_completed.disconnect(completed_receiver)
+        agent_run_failed.disconnect(failed_receiver)
+    run.refresh_from_db()
+    assert run.status == AgentRun.Status.FAILED
+    assert run.finished_at is not None
+    assert run.task_id == ""
+    assert completed == []
+    assert failed == [run.pk]
+    if events:
+        assert len(results) == 1
+        task = results[0].run_loop_task
+        assert task is not None and task.cancelled()
+        assert results[0].current_agent is None
+
+
+@pytest.mark.django_db()
+@pytest.mark.parametrize("successful", [False, True])
+def test_followup_queue_failure_preserves_current_run_outcome(
+    monkeypatch: pytest.MonkeyPatch, user: Any, successful: bool,
+) -> None:
+    session = AgentSession.objects.create(session_key="queue-error", owner=user)
+    run = AgentRun.objects.create(
+        session=session, owner=user, agent_key="default", input_payload="hello",
+    )
+
+    async def runner(*args: Any, **kwargs: Any) -> DummyResult:
+        if not successful:
+            raise ValueError("original model error")
+        return DummyResult()
+
+    def unavailable() -> None:
+        raise OSError("queue unavailable")
+
+    monkeypatch.setattr("agentic_django.services.Runner.run", runner)
+    monkeypatch.setattr("agentic_django.services.dispatch_pending_runs", unavailable)
+    if successful:
+        execute_run(str(run.pk))
+    else:
+        with pytest.raises(ValueError, match="original model error"):
+            execute_run(str(run.pk))
+    run.refresh_from_db()
+    assert run.status == (
+        AgentRun.Status.COMPLETED if successful else AgentRun.Status.FAILED
+    )
+    assert run.task_id == ""
+
+
+@pytest.mark.django_db(transaction=True)
+def test_immediate_backend_completes_a_large_backlog(
+    monkeypatch: pytest.MonkeyPatch, user: Any,
+) -> None:
+    session = AgentSession.objects.create(session_key="immediate-backlog", owner=user)
+    AgentRun.objects.bulk_create([
+        AgentRun(
+            session=session, owner=user, agent_key="default", input_payload="hello",
+        )
+        for _ in range(120)
+    ])
+
+    async def runner(*args: Any, **kwargs: Any) -> DummyResult:
+        return DummyResult()
+
+    monkeypatch.setattr("agentic_django.services.Runner.run", runner)
+    with override_settings(
+        AGENTIC_DJANGO_CONCURRENCY_LIMIT=1,
+        TASKS={"default": {
+            "BACKEND": "django_tasks.backends.immediate.ImmediateBackend",
+        }},
+    ):
+        dispatch_pending_runs()
+    assert AgentRun.objects.filter(status=AgentRun.Status.COMPLETED).count() == 120
+    assert not AgentRun.objects.exclude(task_id="").exists()
+
+
+@pytest.mark.django_db()
+@pytest.mark.parametrize("events", [False, True])
+def test_pending_approval_is_failed_and_result_references_are_released(
+    monkeypatch: pytest.MonkeyPatch, user: Any, events: bool,
+) -> None:
+    from agentic_django.signals import agent_run_completed
+
+    session = AgentSession.objects.create(session_key="approval", owner=user)
+    run = AgentRun.objects.create(
+        session=session, owner=user, agent_key="default", input_payload="hello",
+    )
+    result = DummyResult()
+    result.interruptions = [object()]
+    result.final_output = None
+    completed = []
+
+    def receiver(sender: Any, **kwargs: Any) -> None:
+        completed.append(kwargs["run"].pk)
+
+    async def runner(*args: Any, **kwargs: Any) -> DummyResult:
+        return result
+
+    monkeypatch.setattr("agentic_django.services.Runner.run", runner)
+    monkeypatch.setattr("agentic_django.services._run_with_events", lambda **kw: result)
+    agent_run_completed.connect(receiver, weak=False)
+    try:
+        with override_settings(AGENTIC_DJANGO_ENABLE_EVENTS=events):
+            with pytest.raises(ValueError, match="approval"):
+                execute_run(str(run.pk))
+    finally:
+        agent_run_completed.disconnect(receiver)
+    run.refresh_from_db()
+    assert run.status == AgentRun.Status.FAILED
+    assert run.finished_at is not None
+    assert run.task_id == ""
+    assert run.final_output is None
+    assert completed == []
+    assert result.released
 
 
 def _replace_run_task(monkeypatch: pytest.MonkeyPatch, enqueue: Any) -> None:
@@ -361,6 +542,38 @@ def test_queue_failure_releases_unsent_batch_for_retry(
             monkeypatch,
             lambda run_id: DummyTaskResult("retried"),
         )
+        assert dispatch_pending_runs() == 2
+
+
+@pytest.mark.django_db(transaction=True)
+def test_queue_failure_releases_nested_immediate_submissions(
+    monkeypatch: pytest.MonkeyPatch, user: Any,
+) -> None:
+    from agentic_django.services import enqueue_agent_run
+
+    runs = [
+        AgentRun.objects.create(
+            session=AgentSession.objects.create(session_key=f"nested-{i}", owner=user),
+            owner=user, agent_key="default", input_payload="hello",
+        )
+        for i in range(3)
+    ]
+
+    def enqueue(run_id: str) -> DummyTaskResult:
+        if run_id != str(runs[0].pk):
+            raise OSError("queue unavailable")
+        AgentRun.objects.filter(pk=run_id).update(
+            status=AgentRun.Status.COMPLETED, task_id="",
+        )
+        assert dispatch_pending_runs() == 2
+        return DummyTaskResult("completed-task")
+
+    _replace_run_task(monkeypatch, enqueue)
+    with override_settings(AGENTIC_DJANGO_CONCURRENCY_LIMIT=3):
+        with pytest.raises(OSError, match="queue unavailable"):
+            enqueue_agent_run(str(runs[0].pk))
+        assert not AgentRun.objects.exclude(task_id="").exists()
+        _replace_run_task(monkeypatch, lambda run_id: DummyTaskResult("retried"))
         assert dispatch_pending_runs() == 2
 
 

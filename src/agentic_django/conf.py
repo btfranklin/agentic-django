@@ -92,8 +92,10 @@ def get_concurrency_limit() -> int:
     if configured is None:
         cpu_count = os.cpu_count() or 1
         return max(1, cpu_count)
-    if configured < 1:
-        raise ImproperlyConfigured("AGENTIC_DJANGO_CONCURRENCY_LIMIT must be >= 1")
+    if type(configured) is not int or configured < 1:
+        raise ImproperlyConfigured(
+            "AGENTIC_DJANGO_CONCURRENCY_LIMIT must be an integer >= 1"
+        )
     return configured
 
 
@@ -205,6 +207,7 @@ def validate_settings() -> None:
         import_from_path(config.context_factory)
 
     parse_rate_limit(config.rate_limit)
+    get_concurrency_limit()
     if config.max_input_bytes is not None and config.max_input_bytes < 1:
         raise ImproperlyConfigured("AGENTIC_DJANGO_MAX_INPUT_BYTES must be >= 1")
     if config.max_input_items is not None and config.max_input_items < 1:

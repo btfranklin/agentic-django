@@ -10,6 +10,7 @@ JSON and HTMX polling endpoints.
 | --- | --- | --- |
 | App config | `src/agentic_django/apps.py` | Registers the Django app and validates settings during app startup. |
 | Settings | `src/agentic_django/conf.py` | Reads and validates `AGENTIC_DJANGO_*` settings, cleanup policy, rate limits, and concurrency limits. |
+| Async bridge | `src/agentic_django/async_bridge.py` | Runs async SDK and session calls on one event loop per process. Preserves database work on the calling worker thread. |
 | Models | `src/agentic_django/models.py` | Stores sessions, ordered session items, runs, semantic events, per-owner request counters, and a global dispatch lock row. |
 | Session backend | `src/agentic_django/sessions.py` | Implements the Agents SDK session protocol with ordered database-backed items. |
 | Registry | `src/agentic_django/registry.py` | Loads the host app's agent factory registry and resolves `agent_key` values. |
@@ -31,13 +32,13 @@ JSON and HTMX polling endpoints.
    task ID. Custom submission paths use this same service.
 3. `execute_run` reserves a global concurrency slot and exclusive session access, sends `agent_run_started`, builds
    the agent/session/context/run options, and calls the Agents SDK runner.
-4. If events are disabled, `Runner.run` is executed through `async_to_sync`.
+4. If events are disabled, `Runner.run` is executed through the async bridge.
    If events are enabled, `Runner.run_streamed` is used and semantic
    `RunItemStreamEvent`/`AgentUpdatedStreamEvent` payloads are persisted.
    The default event serializer skips raw token events.
-5. Completion serializes the result, releases agents, saves `final_output`,
+5. Completion serializes the result and saves `final_output`,
    `raw_responses`, `last_response_id`, and completed status, clears the task ID,
-   then sends `agent_run_completed`.
+   then sends `agent_run_completed` and releases agent references.
 6. Failure stores a sanitized error when `DEBUG=False`, marks the run failed,
    sends `agent_run_failed`, and re-raises for worker observability.
 7. HTMX clients poll the fragment endpoint. Terminal runs return
@@ -54,6 +55,9 @@ JSON and HTMX polling endpoints.
   replaced with a generic message. Full exception text stays in server logs.
 - Rate limits and request-size/input-item limits are enforced before run
   creation when configured.
+- JSON numbers must be finite. Each decoded request JSON document can contain
+  at most 100 nested arrays or objects. Invalid values return HTTP 400 before
+  local records are created.
 - Agent registries are host-app supplied. Do not expose powerful tools to
   untrusted input without host-app validation or allowlists.
 
@@ -104,6 +108,27 @@ event and sends its notification in the same helper. Setup failures within the
 executor mark the run failed and release its slot. `agent_session_created` uses
 normal signal dispatch; a receiver exception propagates to its caller.
 
+## Async execution
+
+SDK calls and session reads use one event loop per process. The loop starts in a
+background thread on the first call. It remains open so shared async clients can
+reuse their connections. The bridge uses `async_to_sync` on that running loop;
+thread-sensitive database calls return to the calling worker thread. Concurrent
+workers can submit separate runs to the same loop. The bridge restores the
+caller's ASGI loop and task state when each call ends. A fork starts a new bridge
+in the child process.
+
+When event consumption fails, execution cancels the SDK stream and waits for its
+cleanup before releasing the session slot. A failure to dispatch later work is
+logged and does not replace the completed or failed outcome of the current run.
+A cancelled SDK run task marks a streamed run failed, even when the event stream
+ends without an exception.
+
+The package has no tool approval or resume endpoint. A returned SDK result with
+pending approval interruptions marks the run failed. It must not be reported as
+completed. Host applications must resolve approval within their tool integration
+or use a workflow that stores and resumes the SDK state.
+
 ## Queue reservations
 
 Initial enqueue and pending dispatch use the same queue submission helper. Each
@@ -113,6 +138,10 @@ next dispatch. Completion or rejection by an immediate worker cannot restore an
 obsolete reservation. Submission uses the decorated Django task's `enqueue()`
 method and stores the returned `TaskResult.id`. Dispatch selects one eligible
 row per free slot with a bounded query. It does not load the full pending queue.
+Nested submissions from the immediate backend join the caller's submission
+queue. The outer caller drains that queue in a loop, which prevents stack growth
+when a completed run dispatches the next run. A queue failure releases all
+unsent reservations held by that caller.
 
 ## Session execution
 
@@ -168,6 +197,13 @@ session backend. They pass the returned items to the same conversation template.
 
 The requeue action requires run change permission. The purge action requires run
 delete permission. View permission alone does not permit either action.
+Model validation rejects a run whose owner differs from its session owner. It
+also rejects a session owner change that conflicts with existing runs. Admin
+search uses fields from the configured user model.
+Existing run records are read-only in admin. Object saves are disabled so a form
+cannot overwrite worker results. Create runs through the submission service and
+use the requeue action for retries. Existing session owners and keys
+are also read-only, so edits cannot change the identity used by an active worker.
 
 ## Current Limits
 

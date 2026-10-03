@@ -7,10 +7,21 @@ The high-level flow is:
 1. The submission view validates input and calls `submit_agent_run`, which creates
    an `AgentRun` row with `status="pending"`.
 2. The run is enqueued via Django tasks (Immediate or RQ backend).
-3. The task executes `Runner.run` (async; wrapped with `async_to_sync`) or
+3. The task executes `Runner.run` through the process's shared async bridge or
    `Runner.run_streamed` (sync return) when events are enabled.
 4. The run row is updated with `final_output`, `raw_responses`, and status.
 5. HTMX or API clients poll the status/fragment endpoints.
+
+SDK execution and async session reads share one event loop per process. This
+allows async clients to reuse connections across calls. Thread-sensitive Django
+database work still runs on the calling worker thread. A fork starts a new bridge.
+The immediate backend drains nested submissions in a loop so large backlogs do
+not cause recursive task execution.
+
+A failure to dispatch later work is logged. It does not change the current run's
+outcome. SDK approval interruptions mark a run failed; the package has no approval
+or resume endpoint. A host that needs paused approvals must store and resume SDK
+state through its own workflow.
 
 ## Event streaming
 

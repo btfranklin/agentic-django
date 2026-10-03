@@ -5,10 +5,26 @@ from typing import Any
 
 import pytest
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import override_settings
 from django.utils import timezone
 
 from agentic_django.models import AgentEvent, AgentRun, AgentSession
+
+
+@pytest.mark.django_db()
+def test_cleanup_rejects_explicit_empty_statuses_without_deleting(user: Any) -> None:
+    session = AgentSession.objects.create(session_key="old", owner=user)
+    run = AgentRun.objects.create(
+        session=session, owner=user, agent_key="default", input_payload="hello",
+        status=AgentRun.Status.COMPLETED,
+    )
+    AgentRun.objects.filter(pk=run.pk).update(
+        updated_at=timezone.now() - timedelta(days=2),
+    )
+    with pytest.raises(CommandError, match="cannot be empty"):
+        call_command("agentic_django_cleanup", runs_days=1, runs_statuses="")
+    assert AgentRun.objects.filter(pk=run.pk).exists()
 
 
 @pytest.mark.django_db()

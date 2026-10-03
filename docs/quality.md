@@ -24,8 +24,14 @@ first, then the full pytest suite.
 - Cover owner-scoped request access, session ordering, event serialization,
   cleanup/recovery commands, and settings validation when those contracts
   change.
-- Test admin action permissions, anonymous and cross-owner requests, cleanup
-  races, and interrupted queue submissions. The RQ test loads the backend and
+- Cover repeated async client calls, concurrent bridge calls, process forks,
+  stream cancellation, and large immediate-backend backlogs. Local loopback
+  HTTP servers can verify connection reuse without a provider API key.
+- Cover custom user models, nullable output fields, malformed JSON, query
+  limit overflow, and multipart forms with CSRF checks enabled.
+- Test admin action permissions, saves that race with worker completion,
+  anonymous and cross-owner requests, cleanup races, and interrupted queue
+  submissions. The RQ test loads the backend and
   submits the package task with a mocked queue; it does not need Redis. CI
   installs the RQ extra so this test cannot be skipped for a missing dependency.
 - For migrations or long-running workflows, include success and failure-path

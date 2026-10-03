@@ -53,7 +53,7 @@ class StreamEventSerializer:
 
 def _to_jsonable(value: Any) -> Any:
     if isinstance(value, BaseModel):
-        return value.model_dump(mode="json", exclude_none=True)
+        return value.model_dump(mode="json")
     if dataclasses.is_dataclass(value):
         return {
             field.name: _to_jsonable(getattr(value, field.name))

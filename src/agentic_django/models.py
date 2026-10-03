@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
@@ -30,6 +31,13 @@ class AgentSession(models.Model):
 
     def __str__(self) -> str:
         return f"{self.session_key} ({self.owner_id})"
+
+    def clean(self) -> None:
+        super().clean()
+        if self.pk and self.runs.exclude(owner_id=self.owner_id).exists():
+            raise ValidationError({
+                "owner": "The session owner must match the owners of its runs.",
+            })
 
 
 class AgentSessionItem(models.Model):
@@ -113,6 +121,20 @@ class AgentRun(models.Model):
 
     def __str__(self) -> str:
         return f"{self.agent_key}:{self.status}"
+
+    def clean(self) -> None:
+        super().clean()
+        if self.session_id is not None and self.owner_id is not None:
+            session_owner = (
+                AgentSession.objects.using(self._state.db)
+                .filter(pk=self.session_id)
+                .values_list("owner_id", flat=True)
+                .first()
+            )
+            if session_owner is not None and session_owner != self.owner_id:
+                raise ValidationError({
+                    "session": "The session must belong to the run owner.",
+                })
 
 
 class AgentEvent(models.Model):

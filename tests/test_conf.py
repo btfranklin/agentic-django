@@ -26,6 +26,13 @@ def test_get_concurrency_limit_invalid() -> None:
             get_concurrency_limit()
 
 
+@pytest.mark.parametrize("value", [0, -1, 1.5, True, "2"])
+def test_startup_rejects_invalid_concurrency_limits(value: object) -> None:
+    with override_settings(AGENTIC_DJANGO_CONCURRENCY_LIMIT=value):
+        with pytest.raises(ImproperlyConfigured, match="CONCURRENCY_LIMIT"):
+            validate_settings()
+
+
 def test_validate_settings_requires_registry() -> None:
     with override_settings(AGENTIC_DJANGO_AGENT_REGISTRY=""):
         with pytest.raises(ImproperlyConfigured):

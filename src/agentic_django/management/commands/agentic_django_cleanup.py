@@ -109,7 +109,7 @@ class Command(BaseCommand):
                 raise CommandError(f"{option_key} must be >= 1")
             updated[key] = value
 
-        if options.get("runs_statuses"):
+        if options.get("runs_statuses") is not None:
             updated["runs_statuses"] = self._parse_statuses(options["runs_statuses"])
 
         if options.get("sessions_require_empty") is not None:

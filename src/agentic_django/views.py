@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from typing import Any
 
-from asgiref.sync import async_to_sync
 from django.template.loader import render_to_string
 from django_htmx.http import HttpResponseStopPolling, trigger_client_event
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -12,6 +12,7 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.views import View
 
+from agentic_django.async_bridge import run_async
 from agentic_django.conf import get_settings, parse_rate_limit
 from agentic_django.models import AgentEvent, AgentRun, AgentSession
 from agentic_django.registry import get_agent_registry
@@ -20,6 +21,8 @@ from agentic_django.services import submit_agent_run
 from agentic_django.sessions import get_session
 
 RUN_UPDATE_TRIGGER = "run-update"
+MAX_QUERY_LIMIT = 2**63 - 1
+MAX_JSON_DEPTH = 100
 TERMINAL_RUN_STATUSES = frozenset(
     {AgentRun.Status.COMPLETED, AgentRun.Status.FAILED}
 )
@@ -153,7 +156,7 @@ class AgentSessionItemsView(LoginRequiredMixin, View):
         except ValueError as exc:
             return JsonResponse({"error": str(exc)}, status=400)
         backend_session = get_session(session.session_key, request.user)
-        items = async_to_sync(backend_session.get_items)(limit)
+        items = run_async(backend_session.get_items, limit)
         if _is_htmx(request):
             html_items = [{"payload": item} for item in items]
             return render(
@@ -175,6 +178,8 @@ def _parse_limit(request: HttpRequest) -> int | None:
         raise ValueError("limit must be a non-negative integer") from exc
     if limit < 0:
         raise ValueError("limit must be a non-negative integer")
+    if limit > MAX_QUERY_LIMIT:
+        raise ValueError("limit exceeds the supported integer range")
     return limit
 
 
@@ -183,7 +188,7 @@ def _parse_payload(request: HttpRequest) -> dict[str, Any]:
         if not request.body:
             return {}
         try:
-            payload = json.loads(request.body)
+            payload = _load_json(request.body)
         except json.JSONDecodeError as exc:
             raise ValueError("Invalid JSON payload") from exc
         if not isinstance(payload, dict):
@@ -199,10 +204,29 @@ def _parse_payload(request: HttpRequest) -> dict[str, Any]:
 def _parse_json_value(value: Any) -> Any:
     if isinstance(value, str):
         try:
-            return json.loads(value)
+            return _load_json(value)
         except json.JSONDecodeError:
             return value
     return value
+
+
+def _load_json(value: str | bytes) -> Any:
+    try:
+        payload = json.loads(value)
+    except RecursionError as exc:
+        raise ValueError("JSON payload is nested too deeply") from exc
+    pending = [(payload, 0)]
+    while pending:
+        item, depth = pending.pop()
+        if isinstance(item, float) and not math.isfinite(item):
+            raise ValueError("JSON numbers must be finite")
+        if isinstance(item, (dict, list)):
+            depth += 1
+            if depth > MAX_JSON_DEPTH:
+                raise ValueError("JSON payload is nested too deeply")
+            children = item.values() if isinstance(item, dict) else item
+            pending.extend((child, depth) for child in children)
+    return payload
 
 
 def _is_htmx(request: HttpRequest) -> bool:
@@ -235,14 +259,20 @@ def _enforce_request_limits(request: HttpRequest) -> JsonResponse | None:
     settings_config = get_settings()
     max_bytes = settings_config.max_input_bytes
     if max_bytes is not None:
-        body = request.body
-        if body and len(body) > max_bytes:
+        if request.content_type == "multipart/form-data":
+            try:
+                body_size = int(request.META.get("CONTENT_LENGTH") or 0)
+            except (TypeError, ValueError):
+                body_size = 0
+        else:
+            body_size = len(request.body)
+        if body_size > max_bytes:
             return JsonResponse({"error": "payload too large"}, status=413)
     rate_limit = parse_rate_limit(settings_config.rate_limit)
     if rate_limit is None:
         return None
     max_calls, period_seconds = rate_limit
-    user_id = getattr(request.user, "id", None)
+    user_id = getattr(request.user, "pk", None)
     if user_id is None:
         return None
     if not admit_request(request.user, max_calls, period_seconds):

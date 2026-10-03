@@ -318,6 +318,19 @@ pdm run python manage.py rqworker default --job-class django_tasks_rq.Job
 
 Request limits use one database counter per user. Atomic updates enforce the
 limit across workers, without a cache dependency. Run migrations before use.
+Limits also support custom user primary keys. The concurrency limit must be a
+positive integer or `None`; invalid values stop app startup.
+
+Run creation rejects non-finite JSON numbers and decoded JSON documents with
+more than 100 nested arrays or objects. This check applies to JSON request bodies
+and to JSON decoded from form `config` and `context` fields. Input text is stored
+as text.
+
+SDK calls use one event loop per process so shared async clients can reuse their
+connections. The package does not provide tool approval or resume endpoints.
+If the SDK returns pending approvals, the run is marked failed. See the SDK's
+[tool approval guide](https://openai.github.io/openai-agents-python/human_in_the_loop/)
+when a host application needs approval and resume support.
 
 ## Optional dependencies
 

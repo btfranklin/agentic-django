@@ -33,7 +33,7 @@ def test_to_jsonable_handles_dataclass() -> None:
 
 def test_to_jsonable_handles_pydantic() -> None:
     payload = _to_jsonable(ExampleModel(name="hi"))
-    assert payload == {"name": "hi"}
+    assert payload == {"name": "hi", "value": None}
 
 
 def test_to_jsonable_normalizes_model_dump_fallback() -> None:
@@ -43,7 +43,7 @@ def test_to_jsonable_normalizes_model_dump_fallback() -> None:
 
     assert _to_jsonable(CustomModel()) == {
         "day": "2026-09-05",
-        "nested": {"name": "hi"},
+        "nested": {"name": "hi", "value": None},
     }
 
 

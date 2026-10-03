@@ -3,11 +3,13 @@ from __future__ import annotations
 import logging
 import traceback
 import uuid
+from collections import deque
 from collections.abc import Iterator
 from contextlib import contextmanager
+from threading import local
 from typing import Any
 
-from asgiref.sync import async_to_sync, sync_to_async
+from asgiref.sync import sync_to_async
 from django.conf import settings as django_settings
 from django.db import connection, transaction
 from django.db.models import Max, Q
@@ -17,6 +19,7 @@ from django.utils.module_loading import import_string
 from agents import Runner
 from agents.stream_events import RunItemStreamEvent, StreamEvent
 
+from agentic_django.async_bridge import run_async
 from agentic_django.conf import get_concurrency_limit, get_settings
 from agentic_django.models import AgentEvent, AgentRun, AgentRunLock, AgentSession
 from agentic_django.registry import get_agent
@@ -31,6 +34,7 @@ from agentic_django.signals import (
 )
 
 logger = logging.getLogger(__name__)
+_submission_state = local()
 
 
 def submit_agent_run(
@@ -80,19 +84,30 @@ def enqueue_agent_run(run_id: str) -> None:
 def _enqueue_reserved_runs(reservations: list[tuple[str, str]]) -> None:
     from agentic_django.tasks import run_agent_task
 
-    for index, (run_id, token) in enumerate(reservations):
-        try:
-            task_result = run_agent_task.enqueue(run_id)
-        except Exception:
-            # Release only reservations that this callback still owns.
-            for pending_id, pending_token in reservations[index:]:
-                AgentRun.objects.filter(id=pending_id, task_id=pending_token).update(
-                    task_id="", updated_at=timezone.now()
-                )
-            raise
-        AgentRun.objects.filter(id=run_id, task_id=token).update(
-            task_id=task_result.id, updated_at=timezone.now()
-        )
+    pending = getattr(_submission_state, "pending", None)
+    if pending is not None:
+        pending.extend(reservations)
+        return
+    pending = deque(reservations)
+    _submission_state.pending = pending
+    try:
+        while pending:
+            run_id, token = pending.popleft()
+            try:
+                task_result = run_agent_task.enqueue(run_id)
+            except Exception:
+                # Release only reservations that this callback still owns.
+                pending.appendleft((run_id, token))
+                for pending_id, pending_token in pending:
+                    AgentRun.objects.filter(
+                        id=pending_id, task_id=pending_token,
+                    ).update(task_id="", updated_at=timezone.now())
+                raise
+            AgentRun.objects.filter(id=run_id, task_id=token).update(
+                task_id=task_result.id, updated_at=timezone.now()
+            )
+    finally:
+        _submission_state.pending = None
 
 
 def dispatch_pending_runs() -> int:
@@ -141,9 +156,10 @@ def execute_run(run_id: str) -> None:
         AgentRun.objects.filter(id=run_id, status=AgentRun.Status.PENDING).update(
             task_id="", updated_at=timezone.now()
         )
-        dispatch_pending_runs()
+        _dispatch_after_run(run)
         return
 
+    result = None
     try:
         agent_run_started.send_robust(sender=AgentRun, run=run)
         serializer = _get_serializer()
@@ -160,13 +176,16 @@ def execute_run(run_id: str) -> None:
                 run_options=run_options,
             )
         else:
-            result = async_to_sync(Runner.run)(
+            result = run_async(
+                Runner.run,
                 agent,
                 run.input_payload,
                 session=session,
                 context=context,
                 **run_options,
             )
+        if result.interruptions:
+            raise ValueError("Agent runs that require tool approval are not supported.")
         run.final_output = serializer.serialize(result.final_output)
         run.raw_responses = serializer.serialize(result.raw_responses)
         run.last_response_id = result.last_response_id or ""
@@ -174,7 +193,6 @@ def execute_run(run_id: str) -> None:
         run.task_id = ""
         run.status = AgentRun.Status.COMPLETED
         run.finished_at = timezone.now()
-        result.release_agents()
         run.save(
             update_fields=[
                 "final_output",
@@ -207,7 +225,20 @@ def execute_run(run_id: str) -> None:
         agent_run_failed.send_robust(sender=AgentRun, run=run, exception=exc)
         raise
     finally:
+        try:
+            if result is not None:
+                result.release_agents()
+        finally:
+            _dispatch_after_run(run)
+
+
+def _dispatch_after_run(run: AgentRun) -> None:
+    try:
         dispatch_pending_runs()
+    except Exception:
+        logger.exception(
+            "Failed to dispatch pending agent runs", extra={"run_id": str(run.id)},
+        )
 
 
 def _reserve_run_slot(run: AgentRun) -> bool:
@@ -300,7 +331,7 @@ def _run_with_events(
         )
         return result
 
-    return async_to_sync(_consume)()
+    return run_async(_consume)
 
 
 async def _consume_stream_events(
@@ -311,18 +342,36 @@ async def _consume_stream_events(
     starting_sequence: int,
 ) -> None:
     sequence = starting_sequence
-    async for event in result.stream_events():
-        payload = _serialize_event(event_serializer, event)
-        if payload is None:
-            continue
-        stored_event = AgentEvent(
-            run=run,
-            sequence=sequence,
-            event_type=_event_type(event),
-            payload=payload,
-        )
-        await sync_to_async(_persist_event, thread_sensitive=True)(run, stored_event)
-        sequence += 1
+    events = result.stream_events()
+    try:
+        async for event in events:
+            payload = _serialize_event(event_serializer, event)
+            if payload is None:
+                continue
+            stored_event = AgentEvent(
+                run=run,
+                sequence=sequence,
+                event_type=_event_type(event),
+                payload=payload,
+            )
+            await sync_to_async(_persist_event, thread_sensitive=True)(
+                run, stored_event,
+            )
+            sequence += 1
+        task = result.run_loop_task
+        if task is not None and task.cancelled():
+            raise RuntimeError("The agent stream was cancelled before completion.")
+    except BaseException:
+        result.cancel()
+        try:
+            await events.aclose()
+        except BaseException:
+            logger.exception(
+                "Failed to close agent event stream", extra={"run_id": str(run.id)},
+            )
+        finally:
+            result.release_agents()
+        raise
 
 
 def _persist_event(run: AgentRun, event: AgentEvent) -> None:

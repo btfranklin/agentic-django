@@ -11,7 +11,13 @@ from django.test import Client
 
 from agentic_django.models import AgentRun, AgentSession
 from agentic_django.services import submit_agent_run
-from agentic_django.types import JsonObject, input_items, json_value, run_options
+from agentic_django.types import (
+    JsonObject,
+    JsonValue,
+    input_items,
+    json_value,
+    run_options,
+)
 
 
 def test_json_run_config_uses_strict_sdk_field_types() -> None:
@@ -95,6 +101,31 @@ def test_sdk_input_validation_preserves_function_calls() -> None:
     assert len(items) == 2
     assert items[0].get("type") == "function_call"
     assert items[1].get("type") == "function_call_output"
+
+
+@pytest.mark.parametrize(
+    "summary", [[], [{"type": "summary_text", "text": "Keep this summary."}]]
+)
+def test_sdk_reasoning_summaries_are_reusable_json(
+    summary: list[JsonValue],
+) -> None:
+    payload: JsonObject = {"type": "reasoning", "id": "rs_1", "summary": summary}
+    items = input_items([payload])
+
+    assert items == [payload]
+    assert json.loads(json.dumps(items)) == [payload]
+    assert json.loads(json.dumps(items)) == [payload]
+
+
+def test_sdk_input_validation_checks_lazy_summary_members() -> None:
+    with pytest.raises(ValueError, match="SDK input schema"):
+        input_items([
+            {
+                "type": "reasoning",
+                "id": "rs_1",
+                "summary": [{"type": "summary_text", "text": 42}],
+            }
+        ])
 
 
 @pytest.mark.django_db()

@@ -45,6 +45,8 @@ Keep exceptions on individual lines and state their cause:
   against the SDK dataclass fields. No package data uses explicit `Any`.
 - The SDK error-handler cast applies to dynamic callbacks. Runtime checks
   cannot establish their full Python signatures and annotations.
+- The SDK input adapter checks item fields and reads lazy iterables in JSON
+  mode. A result cast retains the SDK item type after those fields become lists.
 - Tests for custom user models need local assignment exceptions where Django
   stubs resolve the user to the single model in `tests.settings`. The custom
   user test also removes the inherited username field with a local exception.

@@ -352,6 +352,32 @@ def test_session_items_view_htmx(client: Client, user: User) -> None:
 
 
 @pytest.mark.django_db()
+@pytest.mark.parametrize("htmx", [False, True])
+def test_session_history_preserves_reasoning_summaries(
+    client: Client, user: User, htmx: bool,
+) -> None:
+    client.force_login(user)
+    session = AgentSession.objects.create(session_key="reasoning", owner=user)
+    payload: JsonObject = {
+        "type": "reasoning",
+        "id": "rs_1",
+        "summary": [{"type": "summary_text", "text": "<b>Keep this summary.</b>"}],
+    }
+    session.items.create(sequence=1, payload=payload)
+
+    response = client.get(
+        "/sessions/reasoning/items/", HTTP_HX_REQUEST="true" if htmx else "false"
+    )
+
+    assert response.status_code == 200
+    if htmx:
+        assert b"&lt;b&gt;Keep this summary.&lt;/b&gt;" in response.content
+        assert b"ValidatorIterator" not in response.content
+    else:
+        assert response.json()["items"] == [payload]
+
+
+@pytest.mark.django_db()
 def test_run_events_view(client: Client, user: User) -> None:
     client.force_login(user)
     session = AgentSession.objects.create(session_key="thread", owner=user)

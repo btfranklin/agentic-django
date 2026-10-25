@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from typing import Protocol, runtime_checkable
 
 from agents import Agent
@@ -77,7 +77,7 @@ def _to_jsonable(value: object) -> JsonValue:
         }
     if isinstance(value, Mapping):
         return {str(key): _to_jsonable(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple, set)):
+    if isinstance(value, (list, tuple, set, Iterator)):
         return [_to_jsonable(item) for item in value]
     if isinstance(value, (str, int, float, bool)) or value is None:
         return json_value(value)

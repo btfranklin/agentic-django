@@ -6,7 +6,7 @@ from django.test import override_settings
 
 from agentic_django.models import AgentSessionItem
 from agentic_django.sessions import DatabaseSession, get_session
-from agentic_django.types import input_items
+from agentic_django.types import JsonObject, input_items
 
 
 @pytest.mark.django_db()
@@ -53,3 +53,20 @@ def test_get_session_uses_backend(user: User) -> None:
     ):
         session = get_session("thread-2", user)
         assert isinstance(session, DatabaseSession)
+
+
+@pytest.mark.django_db()
+def test_database_session_preserves_reasoning_summaries(user: User) -> None:
+    session = DatabaseSession.get_or_create("reasoning", user)
+    payload: JsonObject = {
+        "type": "reasoning",
+        "id": "rs_1",
+        "summary": [{"type": "summary_text", "text": "Keep this summary."}],
+    }
+    session._add_items(input_items([payload]))
+
+    stored = AgentSessionItem.objects.get(session_id=session._session.id)
+    assert stored.payload == payload
+    assert session._get_items(limit=None) == [payload]
+    assert session._get_items(limit=None) == [payload]
+    assert session._pop_item() == payload

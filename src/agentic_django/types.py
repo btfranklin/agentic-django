@@ -76,10 +76,18 @@ def _input_adapter() -> TypeAdapter[list[TResponseInputItem]]:
 
 
 def input_items(value: object) -> list[TResponseInputItem]:
+    adapter = _input_adapter()
     try:
-        return _input_adapter().validate_python(value, strict=True, extra="forbid")
-    except ValidationError as exc:
+        items = adapter.validate_python(value, strict=True, extra="forbid")
+        # SDK Iterable fields validate lazily. JSON mode reads and validates
+        # their members before these items reach storage or an HTTP response.
+        payload: object = adapter.dump_python(items, mode="json", warnings="error")
+        normalized = json_value(payload)
+    except ValueError as exc:
         raise ValueError("Input items must match the SDK input schema") from exc
+    # The adapter checked the SDK schema; JSON mode replaces iterables with
+    # reusable lists without changing the item fields.
+    return cast(list[TResponseInputItem], normalized)
 
 
 def run_input(value: object) -> str | list[TResponseInputItem]:

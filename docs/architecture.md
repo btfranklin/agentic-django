@@ -111,6 +111,11 @@ types. JSON input is checked before storage. Session items use the SDK
 `run_config` objects are checked against the SDK dataclass fields. Settings can
 also supply constructed SDK configuration and callback objects.
 
+SDK iterable fields, such as reasoning summaries, become reusable lists after
+validation. Their members are checked before storage or an HTTP response. The
+shared JSON serializer also reads nested iterators into lists, so it preserves
+summary text instead of storing an iterator description.
+
 Custom serializers implement the package serializer protocols. Session backends
 implement the SDK `Session` protocol and `get_or_create(session_key, owner)`.
 Runtime protocol checks verify required members. Host code must maintain callback

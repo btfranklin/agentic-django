@@ -56,6 +56,13 @@ def test_serializer_round_trip() -> None:
     assert serializer.deserialize(serializer.serialize(payload)) == payload
 
 
+def test_serializer_materializes_nested_summary_iterators() -> None:
+    summary = {"type": "summary_text", "text": "Keep this summary."}
+    assert JsonSerializer().serialize({"summary": iter([summary])}) == {
+        "summary": [summary]
+    }
+
+
 def test_stream_event_serializer_handles_events() -> None:
     serializer = StreamEventSerializer()
     agent = Agent[object](name="Test Agent", instructions="hi")

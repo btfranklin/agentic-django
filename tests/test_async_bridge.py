@@ -4,21 +4,22 @@ import asyncio
 import os
 import subprocess
 import sys
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar
 from threading import Barrier, Event, get_ident
-from typing import Any
 
 import pytest
-from asgiref.sync import SyncToAsync, async_to_sync, sync_to_async
 from asgiref.local import Local
+from asgiref.sync import SyncToAsync, async_to_sync, sync_to_async
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import User
 
 from agentic_django.async_bridge import _close_async_bridge, run_async
 
 
 @pytest.fixture(autouse=True)
-def reset_bridge() -> Any:
+def reset_bridge() -> Iterator[None]:
     _close_async_bridge()
     yield
     _close_async_bridge()
@@ -75,7 +76,7 @@ def test_concurrent_callers_share_the_loop_and_keep_their_own_sync_threads() -> 
 
 
 @pytest.mark.django_db()
-def test_database_work_can_read_the_callers_uncommitted_transaction(user: Any) -> None:
+def test_database_work_can_read_the_callers_uncommitted_transaction(user: User) -> None:
     def read_user() -> str:
         return get_user_model().objects.get(pk=user.pk).username
 
@@ -122,7 +123,9 @@ def test_nested_call_from_a_sync_callback_uses_the_same_loop_and_thread() -> Non
         return result
 
     async def outer() -> tuple[
-        asyncio.AbstractEventLoop, asyncio.AbstractEventLoop, int,
+        asyncio.AbstractEventLoop,
+        asyncio.AbstractEventLoop,
+        int,
     ]:
         inner_loop, sync_thread = await sync_to_async(callback, thread_sensitive=True)()
         return asyncio.get_running_loop(), inner_loop, sync_thread
@@ -226,7 +229,8 @@ def test_shutdown_cancels_owned_background_tasks_before_closing_the_loop() -> No
 
 
 @pytest.mark.skipif(
-    not hasattr(os, "fork"), reason="The platform does not support fork.",
+    not hasattr(os, "fork"),
+    reason="The platform does not support fork.",
 )
 @pytest.mark.parametrize("lock_held", [False, True])
 def test_fork_child_replaces_the_loop_and_inherited_startup_lock(
@@ -234,6 +238,8 @@ def test_fork_child_replaces_the_loop_and_inherited_startup_lock(
 ) -> None:
     result = subprocess.run(
         [sys.executable, "-m", "tests.scenarios.async_bridge", str(int(lock_held))],
-        capture_output=True, text=True, timeout=20,
+        capture_output=True,
+        text=True,
+        timeout=20,
     )
     assert result.returncode == 0, result.stdout + result.stderr

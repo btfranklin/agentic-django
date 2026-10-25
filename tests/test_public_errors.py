@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
+from django.contrib.auth.models import User
 from django.test import Client, override_settings
 
 from agentic_django.models import AgentRun, AgentSession
@@ -12,7 +11,7 @@ from agentic_django.services import execute_run
 @pytest.mark.django_db()
 @pytest.mark.parametrize("debug", [False, True])
 def test_run_detail_exposes_exception_content_only_in_debug_mode(
-    monkeypatch: pytest.MonkeyPatch, client: Client, user: Any, debug: bool,
+    monkeypatch: pytest.MonkeyPatch, client: Client, user: User, debug: bool,
 ) -> None:
     session = AgentSession.objects.create(session_key="errors", owner=user)
     run = AgentRun.objects.create(

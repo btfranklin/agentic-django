@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from typing import Any
 from uuid import UUID
 
 import pytest
+from agents import Agent
+from django.contrib.auth.models import User
 from pydantic import BaseModel
 
 from agentic_django.models import AgentRun, AgentSession
@@ -22,7 +23,7 @@ class TypedOutput(BaseModel):
 
 @pytest.mark.django_db()
 def test_execute_run_persists_typed_output(
-    monkeypatch: pytest.MonkeyPatch, user: Any
+    monkeypatch: pytest.MonkeyPatch, user: User
 ) -> None:
     session = AgentSession.objects.create(session_key="typed-output", owner=user)
     run = AgentRun.objects.create(
@@ -40,18 +41,20 @@ def test_execute_run_persists_typed_output(
     )
 
     class Result:
-        final_output = output
+        final_output: object = output
         raw_responses = [{"output": output}]
         last_response_id = "response-id"
-        interruptions: list[Any] = []
+        interruptions: list[object] = []
 
         def release_agents(self) -> None:
             pass
 
-    async def fake_run(*args: Any, **kwargs: Any) -> Result:
+    async def fake_run(*args: object, **kwargs: object) -> Result:
         return Result()
 
-    monkeypatch.setattr("agentic_django.services.get_agent", lambda key: object())
+    monkeypatch.setattr(
+        "agentic_django.services.get_agent", lambda key: Agent[object](name="test")
+    )
     monkeypatch.setattr("agentic_django.services.Runner.run", fake_run)
 
     execute_run(str(run.id))

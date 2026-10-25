@@ -1,40 +1,59 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from django.contrib import admin
 from django.contrib.auth import get_user_model
-from django.db.models import QuerySet
+from django.db.models import ForeignKey, OneToOneField, QuerySet
 from django.http import HttpRequest
 from django.utils import timezone
 
 from .models import AgentEvent, AgentRun, AgentSession, AgentSessionItem
 from .services import enqueue_agent_run
 
+# Django admin classes are generic only in the stubs.
+if TYPE_CHECKING:
+    SessionItemInlineBase = admin.TabularInline[AgentSessionItem, AgentSession]
+    EventInlineBase = admin.TabularInline[AgentEvent, AgentRun]
+    SessionAdminBase = admin.ModelAdmin[AgentSession]
+    RunAdminBase = admin.ModelAdmin[AgentRun]
+    EventAdminBase = admin.ModelAdmin[AgentEvent]
+else:
+    SessionItemInlineBase = admin.TabularInline
+    EventInlineBase = admin.TabularInline
+    SessionAdminBase = admin.ModelAdmin
+    RunAdminBase = admin.ModelAdmin
+    EventAdminBase = admin.ModelAdmin
+
 
 def _owner_search_fields() -> list[str]:
     user_model = get_user_model()
     field_names = {field.name for field in user_model._meta.fields}
     lookups = []
-    for name in dict.fromkeys([
-        user_model.USERNAME_FIELD, user_model.get_email_field_name(),
-    ]):
+    for name in dict.fromkeys(
+        [
+            user_model.USERNAME_FIELD,
+            user_model.get_email_field_name(),
+        ]
+    ):
         if name not in field_names:
             continue
         field = user_model._meta.get_field(name)
         lookup = f"owner__{name}"
-        while field.is_relation:
+        while isinstance(field, (ForeignKey, OneToOneField)):
             field = field.target_field
             lookup += f"__{field.name}"
         lookups.append(lookup)
     return lookups
 
 
-class AgentSessionItemInline(admin.TabularInline):
+class AgentSessionItemInline(SessionItemInlineBase):
     model = AgentSessionItem
     extra = 0
     readonly_fields = ("sequence", "payload", "created_at")
 
 
-class AgentEventInline(admin.TabularInline):
+class AgentEventInline(EventInlineBase):
     model = AgentEvent
     extra = 0
     readonly_fields = ("sequence", "event_type", "payload", "created_at")
@@ -42,7 +61,7 @@ class AgentEventInline(admin.TabularInline):
 
 
 @admin.register(AgentSession)
-class AgentSessionAdmin(admin.ModelAdmin):
+class AgentSessionAdmin(SessionAdminBase):
     list_display = ("session_key", "owner", "created_at", "updated_at")
     search_fields = ("session_key",)
     inlines = [AgentSessionItemInline]
@@ -51,7 +70,9 @@ class AgentSessionAdmin(admin.ModelAdmin):
         return [*self.search_fields, *_owner_search_fields()]
 
     def get_readonly_fields(
-        self, request: HttpRequest, obj: AgentSession | None = None,
+        self,
+        request: HttpRequest,
+        obj: AgentSession | None = None,
     ) -> list[str]:
         if obj is not None:
             return ["owner", "session_key"]
@@ -59,7 +80,7 @@ class AgentSessionAdmin(admin.ModelAdmin):
 
 
 @admin.register(AgentRun)
-class AgentRunAdmin(admin.ModelAdmin):
+class AgentRunAdmin(RunAdminBase):
     list_display = ("id", "agent_key", "owner", "status", "created_at")
     list_filter = ("status", "agent_key")
     search_fields = ("id", "agent_key")
@@ -74,12 +95,16 @@ class AgentRunAdmin(admin.ModelAdmin):
         return False
 
     def has_change_permission(
-        self, request: HttpRequest, obj: AgentRun | None = None,
+        self,
+        request: HttpRequest,
+        obj: AgentRun | None = None,
     ) -> bool:
         return obj is None and super().has_change_permission(request, obj)
 
     def get_readonly_fields(
-        self, request: HttpRequest, obj: AgentRun | None = None,
+        self,
+        request: HttpRequest,
+        obj: AgentRun | None = None,
     ) -> list[str]:
         if obj is not None:
             return [field.name for field in self.model._meta.concrete_fields]
@@ -116,7 +141,7 @@ class AgentRunAdmin(admin.ModelAdmin):
 
 
 @admin.register(AgentEvent)
-class AgentEventAdmin(admin.ModelAdmin):
+class AgentEventAdmin(EventAdminBase):
     list_display = ("run", "event_type", "sequence", "created_at")
     list_filter = ("event_type",)
     search_fields = ("run__id",)

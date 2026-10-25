@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import django
 import sys
+
+import django
 from django.conf import settings
 
 from tests import settings as base_settings
@@ -21,33 +22,37 @@ def main() -> None:
     settings.configure(**configured)
     django.setup()
 
-    from django.contrib.admin.sites import AdminSite
-    from django.contrib.auth import get_user_model
-    from django.test import RequestFactory, override_settings
     from unittest.mock import patch
+
+    from django.contrib.admin.sites import AdminSite
+    from django.test import RequestFactory, override_settings
 
     from agentic_django.admin import AgentRunAdmin, AgentSessionAdmin
     from agentic_django.models import AgentRun, AgentSession
     from agentic_django.views import _enforce_request_limits
+    from tests.scenarios.custom_user_app.models import User as CustomUser
 
     request = RequestFactory().get("/")
-    for model, admin_class in (
-        (AgentRun, AgentRunAdmin), (AgentSession, AgentSessionAdmin),
-    ):
-        model_admin = admin_class(model, AdminSite())
-        fields = model_admin.get_search_fields(request)
-        lookup = "owner__account__key" if relational else "owner__email"
-        model_admin.get_search_results(request, model.objects.all(), "needle")
-        assert fields.count(lookup) == 1, fields
-        assert "owner__username" not in fields, fields
+    lookup = "owner__account__key" if relational else "owner__email"
+    run_admin = AgentRunAdmin(AgentRun, AdminSite())
+    run_fields = run_admin.get_search_fields(request)
+    run_admin.get_search_results(request, AgentRun.objects.all(), "needle")
+    assert run_fields.count(lookup) == 1, run_fields
+    assert "owner__username" not in run_fields, run_fields
+    session_admin = AgentSessionAdmin(AgentSession, AdminSite())
+    session_fields = session_admin.get_search_fields(request)
+    session_admin.get_search_results(request, AgentSession.objects.all(), "needle")
+    assert session_fields.count(lookup) == 1, session_fields
+    assert "owner__username" not in session_fields, session_fields
 
     if relational:
         return
 
-    owner = get_user_model()(account_key="employee", email="employee@example.com")
+    owner = CustomUser(account_key="employee", email="employee@example.com")
     assert not hasattr(owner, "id")
     request = RequestFactory().post("/runs/")
-    request.user = owner
+    # The Django plugin uses the default test user for request.user.
+    request.user = owner  # type: ignore[assignment]
     with override_settings(AGENTIC_DJANGO_RATE_LIMIT="1/m"):
         with patch("agentic_django.views.admit_request", return_value=False) as admit:
             response = _enforce_request_limits(request)

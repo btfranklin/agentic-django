@@ -1,30 +1,23 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
-
 import pytest
+from django.contrib.auth.models import User
 from django.test import override_settings
 
 from agentic_django.models import AgentSessionItem
 from agentic_django.sessions import DatabaseSession, get_session
-
-
-@dataclass
-class ExamplePayload:
-    name: str
-    count: int
+from agentic_django.types import input_items
 
 
 @pytest.mark.django_db()
-def test_database_session_lifecycle(user: Any) -> None:
+def test_database_session_lifecycle(user: User) -> None:
     session = DatabaseSession.get_or_create("thread-1", user)
     assert session.session_id
 
-    payloads = [
+    payloads = input_items([
         {"role": "user", "content": "hello"},
         {"role": "assistant", "content": "hi"},
-    ]
+    ])
     session._add_items(payloads)
     assert AgentSessionItem.objects.filter(session_id=session._session.id).count() == 2
 
@@ -42,22 +35,19 @@ def test_database_session_lifecycle(user: Any) -> None:
 
 
 @pytest.mark.django_db()
-def test_database_session_serializes_items(user: Any) -> None:
+def test_database_session_serializes_items(user: User) -> None:
     session = DatabaseSession.get_or_create("thread-serialize", user)
-    items = [{"type": "message", "payload": ExamplePayload(name="hello", count=2)}]
+    items = input_items([{"role": "user", "content": "hello"}])
 
     session._add_items(items)
 
     stored = AgentSessionItem.objects.get(session_id=session._session.id)
-    assert stored.payload == {
-        "type": "message",
-        "payload": {"name": "hello", "count": 2},
-    }
+    assert stored.payload == {"role": "user", "content": "hello"}
     assert session._get_items(limit=None) == [stored.payload]
 
 
 @pytest.mark.django_db()
-def test_get_session_uses_backend(user: Any) -> None:
+def test_get_session_uses_backend(user: User) -> None:
     with override_settings(
         AGENTIC_DJANGO_SESSION_BACKEND="agentic_django.sessions.DatabaseSession"
     ):

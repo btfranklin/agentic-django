@@ -34,6 +34,19 @@ jobs:
             - name: Lint with ruff
               run: |
                   pdm run ruff check src tests --statistics
+            - name: Check types with Mypy
+              run: pdm run typecheck
             - name: Test with pytest
               run: |
                   pdm run pytest
+
+    docs:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v7
+            - name: Install Perfect Doc
+              run: |
+                  rustup update stable --no-self-update
+                  cargo +stable install --locked --git https://github.com/btfranklin/perfect-doc.git --tag v0.1.0 perfect-doc
+            - name: Check documentation offline
+              run: perfect-doc check --offline --no-banner

@@ -1,6 +1,12 @@
 from __future__ import annotations
 
 import uuid
+from typing import TYPE_CHECKING
+
+from agentic_django.types import JsonObject, JsonValue
+
+if TYPE_CHECKING:
+    from django.contrib.auth.base_user import AbstractBaseUser
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -11,12 +17,14 @@ from django.utils import timezone
 class AgentSession(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     session_key = models.CharField(max_length=255)
-    owner = models.ForeignKey(
+    owner: models.ForeignKey[AbstractBaseUser, AbstractBaseUser] = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="agent_sessions",
     )
-    metadata = models.JSONField(default=dict, blank=True)
+    metadata: models.JSONField[JsonObject, JsonObject] = models.JSONField(
+        default=dict, blank=True
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -35,9 +43,11 @@ class AgentSession(models.Model):
     def clean(self) -> None:
         super().clean()
         if self.pk and self.runs.exclude(owner_id=self.owner_id).exists():
-            raise ValidationError({
-                "owner": "The session owner must match the owners of its runs.",
-            })
+            raise ValidationError(
+                {
+                    "owner": "The session owner must match the owners of its runs.",
+                }
+            )
 
 
 class AgentSessionItem(models.Model):
@@ -47,7 +57,7 @@ class AgentSessionItem(models.Model):
         related_name="items",
     )
     sequence = models.PositiveBigIntegerField()
-    payload = models.JSONField()
+    payload: models.JSONField[JsonValue, JsonValue] = models.JSONField()
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -77,7 +87,7 @@ class AgentRun(models.Model):
         on_delete=models.CASCADE,
         related_name="runs",
     )
-    owner = models.ForeignKey(
+    owner: models.ForeignKey[AbstractBaseUser, AbstractBaseUser] = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="agent_runs",
@@ -88,14 +98,20 @@ class AgentRun(models.Model):
         choices=Status.choices,
         default=Status.PENDING,
     )
-    input_payload = models.JSONField()
-    final_output = models.JSONField(null=True, blank=True)
-    raw_responses = models.JSONField(null=True, blank=True)
+    input_payload: models.JSONField[JsonValue, JsonValue] = models.JSONField()
+    final_output: models.JSONField[JsonValue, JsonValue] = models.JSONField(
+        null=True, blank=True
+    )
+    raw_responses: models.JSONField[JsonValue, JsonValue] = models.JSONField(
+        null=True, blank=True
+    )
     last_response_id = models.CharField(max_length=200, blank=True, default="")
     error = models.TextField(blank=True, default="")
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
-    metadata = models.JSONField(default=dict, blank=True)
+    metadata: models.JSONField[JsonObject, JsonObject] = models.JSONField(
+        default=dict, blank=True
+    )
     task_id = models.CharField(max_length=200, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -132,9 +148,11 @@ class AgentRun(models.Model):
                 .first()
             )
             if session_owner is not None and session_owner != self.owner_id:
-                raise ValidationError({
-                    "session": "The session must belong to the run owner.",
-                })
+                raise ValidationError(
+                    {
+                        "session": "The session must belong to the run owner.",
+                    }
+                )
 
 
 class AgentEvent(models.Model):
@@ -145,7 +163,7 @@ class AgentEvent(models.Model):
     )
     sequence = models.PositiveBigIntegerField()
     event_type = models.CharField(max_length=64)
-    payload = models.JSONField()
+    payload: models.JSONField[JsonValue, JsonValue] = models.JSONField()
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -165,10 +183,12 @@ class AgentRunLock(models.Model):
 
 
 class AgentRequestLimit(models.Model):
-    owner = models.OneToOneField(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="agent_request_limit",
+    owner: models.OneToOneField[AbstractBaseUser, AbstractBaseUser] = (
+        models.OneToOneField(
+            settings.AUTH_USER_MODEL,
+            on_delete=models.CASCADE,
+            related_name="agent_request_limit",
+        )
     )
     window_started_at = models.DateTimeField(default=timezone.now)
     count = models.PositiveBigIntegerField(default=0)

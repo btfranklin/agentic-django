@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from collections.abc import AsyncIterator
 
 import pytest
-from asgiref.sync import async_to_sync
-from agents.stream_events import AgentUpdatedStreamEvent
 from agents import Agent
+from agents.stream_events import AgentUpdatedStreamEvent, StreamEvent
+from asgiref.sync import async_to_sync
+from django.contrib.auth.models import User
 
 from agentic_django.models import AgentEvent, AgentRun, AgentSession
 from agentic_django.serializers import StreamEventSerializer
@@ -16,7 +17,7 @@ from agentic_django.signals import agent_run_event
 
 @pytest.mark.django_db(transaction=True)
 def test_events_are_visible_before_stream_failure_and_signals_can_read_database(
-    user: Any,
+    user: User,
 ) -> None:
     session = AgentSession.objects.create(session_key="events", owner=user)
     run = AgentRun.objects.create(
@@ -24,20 +25,24 @@ def test_events_are_visible_before_stream_failure_and_signals_can_read_database(
     )
     notifications = []
 
-    def receiver(sender: Any, event: AgentEvent, **kwargs: Any) -> None:
+    def receiver(sender: object, event: AgentEvent, **kwargs: object) -> None:
         notifications.append(AgentEvent.objects.get(id=event.id).sequence)
 
     class Stream:
+        @property
+        def run_loop_task(self) -> asyncio.Task[None] | None:
+            return None
+
         def cancel(self) -> None:
             pass
 
         def release_agents(self) -> None:
             pass
 
-        async def stream_events(self) -> Any:
-            yield AgentUpdatedStreamEvent(new_agent=Agent(name="first"))
+        async def stream_events(self) -> AsyncIterator[StreamEvent]:
+            yield AgentUpdatedStreamEvent(new_agent=Agent[object](name="first"))
             assert notifications == [1]
-            yield AgentUpdatedStreamEvent(new_agent=Agent(name="second"))
+            yield AgentUpdatedStreamEvent(new_agent=Agent[object](name="second"))
             assert notifications == [1, 2]
             raise RuntimeError("stream interrupted")
 
@@ -55,7 +60,7 @@ def test_events_are_visible_before_stream_failure_and_signals_can_read_database(
 
 @pytest.mark.django_db(transaction=True)
 def test_event_storage_failure_stops_stream_before_returning(
-    user: Any, monkeypatch: pytest.MonkeyPatch,
+    user: User, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = AgentSession.objects.create(session_key="cancel-stream", owner=user)
     run = AgentRun.objects.create(
@@ -69,6 +74,10 @@ def test_event_storage_failure_stops_stream_before_returning(
         released = False
         task: asyncio.Task[None] | None = None
 
+        @property
+        def run_loop_task(self) -> asyncio.Task[None] | None:
+            return self.task
+
         async def work(self) -> None:
             try:
                 await asyncio.Event().wait()
@@ -76,11 +85,11 @@ def test_event_storage_failure_stops_stream_before_returning(
                 await asyncio.sleep(0)
                 self.cleaned_up = True
 
-        async def stream_events(self) -> Any:
+        async def stream_events(self) -> AsyncIterator[StreamEvent]:
             self.task = asyncio.create_task(self.work())
             await asyncio.sleep(0)
             try:
-                yield AgentUpdatedStreamEvent(new_agent=Agent(name="first"))
+                yield AgentUpdatedStreamEvent(new_agent=Agent[object](name="first"))
                 await self.task
             finally:
                 try:
@@ -97,7 +106,7 @@ def test_event_storage_failure_stops_stream_before_returning(
         def release_agents(self) -> None:
             self.released = True
 
-    def broken_storage(*args: Any) -> None:
+    def broken_storage(*args: object) -> None:
         raise OSError("event storage unavailable")
 
     monkeypatch.setattr("agentic_django.services._persist_event", broken_storage)

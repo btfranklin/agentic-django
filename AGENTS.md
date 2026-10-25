@@ -23,6 +23,8 @@ belongs in the docs it links to.
 
 - Install dev and RQ test dependencies: `pdm install --group dev --group rq`
 - Lint: `pdm run lint`
+- Type check: `pdm run typecheck`
+- Documentation: `pdm run docs`
 - Test: `pdm run test`
 - Full local validation: `pdm run check`
 
@@ -43,7 +45,8 @@ bounded compatibility track is required, such as `Django>=6,<7`.
 
 - Target Python 3.12+ and Django 6.x.
 - Type-annotate functions and use built-in generics (`list[str]`,
-  `dict[str, Any]`) with `| None` for optionals.
+  `dict[str, JsonValue]`) with `| None` for optionals. Minimize `Any`; see
+  [type safety](docs/quality.md#type-safety) for boundary exceptions.
 - Prefer Django 6 tasks for background work; introduce Celery only if a host app
   needs its operational guarantees.
 - Keep request-facing code owner-scoped. Views and queries that expose sessions,

@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from typing import Any
 import subprocess
 import sys
 
 import pytest
 from django.contrib.admin.sites import AdminSite
-from django.contrib.auth.models import Permission
+from django.contrib.auth.models import Permission, User
 from django.core.exceptions import PermissionDenied
 from django.http import HttpResponse
 from django.test import RequestFactory
@@ -27,7 +26,7 @@ def test_admin_and_rate_limits_support_a_custom_user_model(identity: str) -> Non
 
 @pytest.mark.django_db()
 def test_admin_save_cannot_overwrite_a_worker_completion(
-    user: Any, monkeypatch: pytest.MonkeyPatch,
+    user: User, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     user.is_staff = True
     user.save()
@@ -39,7 +38,7 @@ def test_admin_save_cannot_overwrite_a_worker_completion(
     )
     request = RequestFactory().post("/", {"_save": "Save"})
     request.user = user
-    request._dont_enforce_csrf_checks = True
+    setattr(request, "_dont_enforce_csrf_checks", True)
     model_admin = AgentRunAdmin(AgentRun, AdminSite())
     finished_at = timezone.now()
     loaded = model_admin.get_object(request, str(run.pk))
@@ -71,7 +70,7 @@ def test_admin_save_cannot_overwrite_a_worker_completion(
 
 
 @pytest.mark.django_db()
-def test_admin_run_form_rejects_another_owners_session(user: Any) -> None:
+def test_admin_run_form_rejects_another_owners_session(user: User) -> None:
     from django.contrib.auth import get_user_model
 
     other = get_user_model().objects.create_user(username="other-owner")
@@ -89,7 +88,7 @@ def test_admin_run_form_rejects_another_owners_session(user: Any) -> None:
 
 
 @pytest.mark.django_db()
-def test_admin_session_form_keeps_owner_with_runs(user: Any) -> None:
+def test_admin_session_form_keeps_owner_with_runs(user: User) -> None:
     from django.contrib.auth import get_user_model
 
     other = get_user_model().objects.create_user(username="other-owner")
@@ -110,7 +109,7 @@ def test_admin_session_form_keeps_owner_with_runs(user: Any) -> None:
 
 
 @pytest.mark.django_db()
-def test_admin_preserves_existing_execution_identity_and_state(user: Any) -> None:
+def test_admin_preserves_existing_execution_identity_and_state(user: User) -> None:
     session = AgentSession.objects.create(session_key="active", owner=user)
     other = AgentSession.objects.create(session_key="other", owner=user)
     run = AgentRun.objects.create(
@@ -156,7 +155,7 @@ def test_admin_preserves_existing_execution_identity_and_state(user: Any) -> Non
     ],
 )
 def test_run_actions_enforce_model_permissions(
-    user: Any, monkeypatch: pytest.MonkeyPatch,
+    user: User, monkeypatch: pytest.MonkeyPatch,
     permission: str, action: str, allowed: bool,
 ) -> None:
     user.is_staff = True

@@ -1,38 +1,42 @@
 from __future__ import annotations
 
 import json
-from typing import Any
 
 import pytest
-from django.test import Client, RequestFactory
-from django.test import override_settings
+from agents import Agent
+from django.contrib.auth.models import User
+from django.http.response import HttpResponseBase
+from django.test import Client, RequestFactory, override_settings
 from django_htmx.http import HTMX_STOP_POLLING
 
 from agentic_django.models import AgentEvent, AgentRun, AgentSession
+from agentic_django.types import JsonObject, json_value
 from agentic_django.views import RUN_UPDATE_TRIGGER, _enforce_request_limits
 from tests.support import RecordingSession
 
 
-def _trigger_events(response: Any) -> dict[str, dict[str, Any]]:
-    return json.loads(response["HX-Trigger"])
+def _trigger_events(response: HttpResponseBase) -> JsonObject:
+    value = json_value(json.loads(response["HX-Trigger"]))
+    assert isinstance(value, dict)
+    return value
 
 
 @pytest.mark.django_db()
-def test_create_run_requires_session_key(client: Client, user: Any) -> None:
+def test_create_run_requires_session_key(client: Client, user: User) -> None:
     client.force_login(user)
     response = client.post("/runs/", {"input": "hello"})
     assert response.status_code == 400
 
 
 @pytest.mark.django_db()
-def test_create_run_requires_input(client: Client, user: Any) -> None:
+def test_create_run_requires_input(client: Client, user: User) -> None:
     client.force_login(user)
     response = client.post("/runs/", {"session_key": "thread"})
     assert response.status_code == 400
 
 
 @pytest.mark.django_db()
-def test_create_run_rejects_invalid_json(client: Client, user: Any) -> None:
+def test_create_run_rejects_invalid_json(client: Client, user: User) -> None:
     client.force_login(user)
     response = client.post(
         "/runs/",
@@ -43,7 +47,7 @@ def test_create_run_rejects_invalid_json(client: Client, user: Any) -> None:
 
 
 @pytest.mark.django_db()
-def test_create_run_rejects_non_object_json(client: Client, user: Any) -> None:
+def test_create_run_rejects_non_object_json(client: Client, user: User) -> None:
     client.force_login(user)
     response = client.post(
         "/runs/",
@@ -57,12 +61,12 @@ def test_create_run_rejects_non_object_json(client: Client, user: Any) -> None:
 def test_create_run_json_success(
     monkeypatch: pytest.MonkeyPatch,
     client: Client,
-    user: Any,
+    user: User,
 ) -> None:
     client.force_login(user)
     monkeypatch.setattr(
         "agentic_django.views.get_agent_registry",
-        lambda: {"default": lambda: object()},
+        lambda: {"default": lambda: Agent[object](name="test")},
     )
     monkeypatch.setattr(
         "agentic_django.services.enqueue_agent_run",
@@ -83,12 +87,12 @@ def test_create_run_json_success(
 
 @pytest.mark.django_db()
 def test_create_run_uses_session_backend(
-    monkeypatch: pytest.MonkeyPatch, client: Client, user: Any
+    monkeypatch: pytest.MonkeyPatch, client: Client, user: User
 ) -> None:
     client.force_login(user)
     monkeypatch.setattr(
         "agentic_django.views.get_agent_registry",
-        lambda: {"default": lambda: object()},
+        lambda: {"default": lambda: Agent[object](name="test")},
     )
     monkeypatch.setattr(
         "agentic_django.services.enqueue_agent_run",
@@ -114,12 +118,12 @@ def test_create_run_uses_session_backend(
 def test_create_run_htmx(
     monkeypatch: pytest.MonkeyPatch,
     client: Client,
-    user: Any,
+    user: User,
 ) -> None:
     client.force_login(user)
     monkeypatch.setattr(
         "agentic_django.views.get_agent_registry",
-        lambda: {"default": lambda: object()},
+        lambda: {"default": lambda: Agent[object](name="test")},
     )
     monkeypatch.setattr(
         "agentic_django.services.enqueue_agent_run",
@@ -142,7 +146,7 @@ def test_create_run_htmx(
 def test_create_run_unknown_agent(
     monkeypatch: pytest.MonkeyPatch,
     client: Client,
-    user: Any,
+    user: User,
 ) -> None:
     client.force_login(user)
     monkeypatch.setattr("agentic_django.views.get_agent_registry", lambda: {})
@@ -160,12 +164,12 @@ def test_create_run_unknown_agent(
 def test_create_run_rate_limited(
     monkeypatch: pytest.MonkeyPatch,
     client: Client,
-    user: Any,
+    user: User,
 ) -> None:
     client.force_login(user)
     monkeypatch.setattr(
         "agentic_django.views.get_agent_registry",
-        lambda: {"default": lambda: object()},
+        lambda: {"default": lambda: Agent[object](name="test")},
     )
     monkeypatch.setattr(
         "agentic_django.services.enqueue_agent_run",
@@ -190,7 +194,7 @@ def test_create_run_rate_limited(
 
 
 @pytest.mark.django_db()
-def test_create_run_payload_too_large(client: Client, user: Any) -> None:
+def test_create_run_payload_too_large(client: Client, user: User) -> None:
     client.force_login(user)
     payload = {"session_key": "thread", "input": "x" * 50}
     with override_settings(AGENTIC_DJANGO_MAX_INPUT_BYTES=10):
@@ -203,7 +207,7 @@ def test_create_run_payload_too_large(client: Client, user: Any) -> None:
 
 
 @pytest.mark.django_db()
-def test_create_run_too_many_items(client: Client, user: Any) -> None:
+def test_create_run_too_many_items(client: Client, user: User) -> None:
     client.force_login(user)
     payload = {
         "session_key": "thread",
@@ -219,7 +223,7 @@ def test_create_run_too_many_items(client: Client, user: Any) -> None:
 
 
 @pytest.mark.django_db()
-def test_run_detail_view(client: Client, user: Any) -> None:
+def test_run_detail_view(client: Client, user: User) -> None:
     client.force_login(user)
     session = AgentSession.objects.create(session_key="thread", owner=user)
     run = AgentRun.objects.create(
@@ -238,7 +242,7 @@ def test_run_detail_view(client: Client, user: Any) -> None:
 
 
 @pytest.mark.django_db()
-def test_run_fragment_view(client: Client, user: Any) -> None:
+def test_run_fragment_view(client: Client, user: User) -> None:
     client.force_login(user)
     session = AgentSession.objects.create(session_key="thread", owner=user)
     run = AgentRun.objects.create(
@@ -255,7 +259,10 @@ def test_run_fragment_view(client: Client, user: Any) -> None:
 
 
 @pytest.mark.django_db()
-def test_run_fragment_pending_includes_polling_attrs(client: Client, user: Any) -> None:
+def test_run_fragment_pending_includes_polling_attrs(
+    client: Client,
+    user: User,
+) -> None:
     client.force_login(user)
     session = AgentSession.objects.create(session_key="thread", owner=user)
     run = AgentRun.objects.create(
@@ -277,7 +284,7 @@ def test_run_fragment_pending_includes_polling_attrs(client: Client, user: Any) 
 @pytest.mark.django_db()
 def test_run_fragment_completed_removes_polling_attrs(
     client: Client,
-    user: Any,
+    user: User,
 ) -> None:
     client.force_login(user)
     session = AgentSession.objects.create(session_key="thread", owner=user)
@@ -299,7 +306,10 @@ def test_run_fragment_completed_removes_polling_attrs(
 
 
 @pytest.mark.django_db()
-def test_run_fragment_completed_non_htmx_returns_200(client: Client, user: Any) -> None:
+def test_run_fragment_completed_non_htmx_returns_200(
+    client: Client,
+    user: User,
+) -> None:
     client.force_login(user)
     session = AgentSession.objects.create(session_key="thread", owner=user)
     run = AgentRun.objects.create(
@@ -317,7 +327,7 @@ def test_run_fragment_completed_non_htmx_returns_200(client: Client, user: Any) 
 
 
 @pytest.mark.django_db()
-def test_session_items_view(client: Client, user: Any) -> None:
+def test_session_items_view(client: Client, user: User) -> None:
     client.force_login(user)
     session = AgentSession.objects.create(session_key="thread", owner=user)
     session.items.create(sequence=1, payload={"role": "user", "content": "hello"})
@@ -330,7 +340,7 @@ def test_session_items_view(client: Client, user: Any) -> None:
 
 
 @pytest.mark.django_db()
-def test_session_items_view_htmx(client: Client, user: Any) -> None:
+def test_session_items_view_htmx(client: Client, user: User) -> None:
     client.force_login(user)
     session = AgentSession.objects.create(session_key="thread", owner=user)
     session.items.create(sequence=1, payload={"role": "user", "content": "hello"})
@@ -342,7 +352,7 @@ def test_session_items_view_htmx(client: Client, user: Any) -> None:
 
 
 @pytest.mark.django_db()
-def test_run_events_view(client: Client, user: Any) -> None:
+def test_run_events_view(client: Client, user: User) -> None:
     client.force_login(user)
     session = AgentSession.objects.create(session_key="thread", owner=user)
     run = AgentRun.objects.create(
@@ -378,17 +388,23 @@ def test_run_events_view(client: Client, user: Any) -> None:
 @pytest.mark.parametrize("text", ["123", "true", "null", '"quoted"', '["text"]'])
 @pytest.mark.parametrize("as_json", [False, True])
 def test_create_run_preserves_input_text(
-    monkeypatch: pytest.MonkeyPatch, client: Client, user: Any,
-    text: str, as_json: bool,
+    monkeypatch: pytest.MonkeyPatch,
+    client: Client,
+    user: User,
+    text: str,
+    as_json: bool,
 ) -> None:
     client.force_login(user)
     monkeypatch.setattr(
-        "agentic_django.services.enqueue_agent_run", lambda run_id: None,
+        "agentic_django.services.enqueue_agent_run",
+        lambda run_id: None,
     )
     payload = {"session_key": "thread", "input": text}
     if as_json:
         response = client.post(
-            "/runs/", data=json.dumps(payload), content_type="application/json",
+            "/runs/",
+            data=json.dumps(payload),
+            content_type="application/json",
         )
     else:
         response = client.post("/runs/", data=payload)
@@ -398,15 +414,20 @@ def test_create_run_preserves_input_text(
 
 @pytest.mark.django_db()
 def test_create_run_preserves_json_context_text(
-    monkeypatch: pytest.MonkeyPatch, client: Client, user: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    client: Client,
+    user: User,
 ) -> None:
     client.force_login(user)
     monkeypatch.setattr(
-        "agentic_django.services.enqueue_agent_run", lambda run_id: None,
+        "agentic_django.services.enqueue_agent_run",
+        lambda run_id: None,
     )
     payload = {"session_key": "thread", "input": "hello", "context": "123"}
     response = client.post(
-        "/runs/", data=json.dumps(payload), content_type="application/json",
+        "/runs/",
+        data=json.dumps(payload),
+        content_type="application/json",
     )
     assert response.status_code == 200
     run = AgentRun.objects.get(id=response.json()["run_id"])
@@ -415,14 +436,18 @@ def test_create_run_preserves_json_context_text(
 
 @pytest.mark.django_db()
 @pytest.mark.parametrize(
-    "session_key", ["thread key", "thread/key", "café", "x" * 256, 123, ["thread"]],
+    "session_key",
+    ["thread key", "thread/key", "café", "x" * 256, 123, ["thread"]],
 )
 def test_create_run_rejects_session_keys_outside_url_contract(
-    client: Client, user: Any, session_key: Any,
+    client: Client,
+    user: User,
+    session_key: object,
 ) -> None:
     client.force_login(user)
     response = client.post(
-        "/runs/", data=json.dumps({"session_key": session_key, "input": "hello"}),
+        "/runs/",
+        data=json.dumps({"session_key": session_key, "input": "hello"}),
         content_type="application/json",
     )
     assert response.status_code == 400
@@ -433,14 +458,19 @@ def test_create_run_rejects_session_keys_outside_url_contract(
 @pytest.mark.django_db()
 @pytest.mark.parametrize("session_key", ["thread_A-123", "x" * 255])
 def test_created_session_key_can_retrieve_history(
-    monkeypatch: pytest.MonkeyPatch, client: Client, user: Any, session_key: str,
+    monkeypatch: pytest.MonkeyPatch,
+    client: Client,
+    user: User,
+    session_key: str,
 ) -> None:
     client.force_login(user)
     monkeypatch.setattr(
-        "agentic_django.services.enqueue_agent_run", lambda run_id: None,
+        "agentic_django.services.enqueue_agent_run",
+        lambda run_id: None,
     )
     response = client.post(
-        "/runs/", data={"session_key": session_key, "input": "hello"},
+        "/runs/",
+        data={"session_key": session_key, "input": "hello"},
     )
     assert response.status_code == 200
     response = client.get(f"/sessions/{session_key}/items/")
@@ -452,12 +482,18 @@ def test_created_session_key_can_retrieve_history(
 @pytest.mark.parametrize("limit", ["-1", "invalid"])
 @pytest.mark.parametrize("endpoint", ["items", "events"])
 def test_history_endpoints_reject_invalid_limits(
-    client: Client, user: Any, limit: str, endpoint: str,
+    client: Client,
+    user: User,
+    limit: str,
+    endpoint: str,
 ) -> None:
     client.force_login(user)
     session = AgentSession.objects.create(session_key="thread", owner=user)
     run = AgentRun.objects.create(
-        session=session, owner=user, agent_key="default", input_payload="hello",
+        session=session,
+        owner=user,
+        agent_key="default",
+        input_payload="hello",
     )
     url = (
         "/sessions/thread/items/" if endpoint == "items" else f"/runs/{run.id}/events/"
@@ -471,16 +507,24 @@ def test_history_endpoints_reject_invalid_limits(
 @pytest.mark.django_db()
 @pytest.mark.parametrize("endpoint", ["items", "events"])
 def test_history_endpoints_accept_zero_limit(
-    client: Client, user: Any, endpoint: str,
+    client: Client,
+    user: User,
+    endpoint: str,
 ) -> None:
     client.force_login(user)
     session = AgentSession.objects.create(session_key="thread", owner=user)
     session.items.create(sequence=1, payload={"role": "user", "content": "hello"})
     run = AgentRun.objects.create(
-        session=session, owner=user, agent_key="default", input_payload="hello",
+        session=session,
+        owner=user,
+        agent_key="default",
+        input_payload="hello",
     )
     AgentEvent.objects.create(
-        run=run, sequence=1, event_type="tool_called", payload={"name": "tool"},
+        run=run,
+        sequence=1,
+        event_type="tool_called",
+        payload={"name": "tool"},
     )
     url = (
         "/sessions/thread/items/" if endpoint == "items" else f"/runs/{run.id}/events/"
@@ -494,14 +538,21 @@ def test_history_endpoints_accept_zero_limit(
 @pytest.mark.django_db()
 @pytest.mark.parametrize("agent_key", [["default"], [], {"key": "default"}, 123])
 def test_create_run_rejects_invalid_agent_key_type(
-    client: Client, user: Any, agent_key: Any,
+    client: Client,
+    user: User,
+    agent_key: object,
 ) -> None:
     client.force_login(user)
     response = client.post(
-        "/runs/", content_type="application/json",
-        data=json.dumps({
-            "session_key": "thread", "input": "hello", "agent_key": agent_key,
-        }),
+        "/runs/",
+        content_type="application/json",
+        data=json.dumps(
+            {
+                "session_key": "thread",
+                "input": "hello",
+                "agent_key": agent_key,
+            }
+        ),
     )
     assert response.status_code == 400
     assert response.json()["error"] == "agent_key must be a string"
@@ -509,25 +560,32 @@ def test_create_run_rejects_invalid_agent_key_type(
 
 
 @pytest.mark.django_db()
-@pytest.mark.parametrize('authenticated', [False, True])
+@pytest.mark.parametrize("authenticated", [False, True])
 def test_endpoints_deny_access_to_other_owners(
-    client: Client, user: Any, authenticated: bool,
+    client: Client,
+    user: User,
+    authenticated: bool,
 ) -> None:
     from django.contrib.auth import get_user_model
 
-    owner = get_user_model().objects.create_user(username='private-owner')
-    session = AgentSession.objects.create(owner=owner, session_key='private')
-    session.items.create(sequence=1, payload={'content': 'private history'})
+    owner = get_user_model().objects.create_user(username="private-owner")
+    session = AgentSession.objects.create(owner=owner, session_key="private")
+    session.items.create(sequence=1, payload={"content": "private history"})
     run = AgentRun.objects.create(
-        owner=owner, session=session, agent_key='default', input_payload='private',
+        owner=owner,
+        session=session,
+        agent_key="default",
+        input_payload="private",
     )
-    AgentEvent.objects.create(run=run, sequence=1, event_type='message', payload={})
+    AgentEvent.objects.create(run=run, sequence=1, event_type="message", payload={})
     if authenticated:
         client.force_login(user)
     with override_settings(AGENTIC_DJANGO_ENABLE_EVENTS=True):
         for url in (
-            f'/runs/{run.pk}/', f'/runs/{run.pk}/fragment/',
-            f'/runs/{run.pk}/events/', '/sessions/private/items/',
+            f"/runs/{run.pk}/",
+            f"/runs/{run.pk}/fragment/",
+            f"/runs/{run.pk}/events/",
+            "/sessions/private/items/",
         ):
             response = client.get(url)
             assert response.status_code == (404 if authenticated else 302)
@@ -535,17 +593,17 @@ def test_endpoints_deny_access_to_other_owners(
 
 @pytest.mark.django_db()
 def test_anonymous_client_cannot_create_run(client: Client) -> None:
-    response = client.post('/runs/', {'session_key': 'private', 'input': 'hi'})
+    response = client.post("/runs/", {"session_key": "private", "input": "hi"})
     assert response.status_code == 302
     assert not AgentRun.objects.exists()
     assert not AgentSession.objects.exists()
 
 
 @pytest.mark.django_db()
-def test_run_creation_requires_csrf_token(user: Any) -> None:
+def test_run_creation_requires_csrf_token(user: User) -> None:
     client = Client(enforce_csrf_checks=True)
     client.force_login(user)
-    response = client.post('/runs/', {'session_key': 'private', 'input': 'hi'})
+    response = client.post("/runs/", {"session_key": "private", "input": "hi"})
     assert response.status_code == 403
     assert not AgentRun.objects.exists()
 
@@ -554,16 +612,25 @@ def test_run_creation_requires_csrf_token(user: Any) -> None:
 @pytest.mark.parametrize("endpoint", ["items", "events"])
 @pytest.mark.parametrize("limit", [2**63, 10**100])
 def test_history_endpoints_reject_limits_outside_database_range(
-    client: Client, user: Any, endpoint: str, limit: int,
+    client: Client,
+    user: User,
+    endpoint: str,
+    limit: int,
 ) -> None:
     client.force_login(user)
     session = AgentSession.objects.create(session_key="thread", owner=user)
     session.items.create(sequence=1, payload={"role": "user", "content": "hello"})
     run = AgentRun.objects.create(
-        session=session, owner=user, agent_key="default", input_payload="hello",
+        session=session,
+        owner=user,
+        agent_key="default",
+        input_payload="hello",
     )
     AgentEvent.objects.create(
-        run=run, sequence=1, event_type="message", payload={"content": "hello"},
+        run=run,
+        sequence=1,
+        event_type="message",
+        payload={"content": "hello"},
     )
     url = (
         "/sessions/thread/items/" if endpoint == "items" else f"/runs/{run.pk}/events/"
@@ -576,16 +643,24 @@ def test_history_endpoints_reject_limits_outside_database_range(
 @pytest.mark.django_db()
 @pytest.mark.parametrize("endpoint", ["items", "events"])
 def test_history_endpoints_accept_largest_supported_limit(
-    client: Client, user: Any, endpoint: str,
+    client: Client,
+    user: User,
+    endpoint: str,
 ) -> None:
     client.force_login(user)
     session = AgentSession.objects.create(session_key="thread", owner=user)
     session.items.create(sequence=1, payload={"role": "user", "content": "hello"})
     run = AgentRun.objects.create(
-        session=session, owner=user, agent_key="default", input_payload="hello",
+        session=session,
+        owner=user,
+        agent_key="default",
+        input_payload="hello",
     )
     AgentEvent.objects.create(
-        run=run, sequence=1, event_type="message", payload={"content": "hello"},
+        run=run,
+        sequence=1,
+        event_type="message",
+        payload={"content": "hello"},
     )
     url = (
         "/sessions/thread/items/" if endpoint == "items" else f"/runs/{run.pk}/events/"
@@ -600,18 +675,23 @@ def test_history_endpoints_accept_largest_supported_limit(
 @pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity", "1e999"])
 @pytest.mark.parametrize("field", ["input", "config", "context"])
 def test_create_run_rejects_non_finite_json_numbers(
-    client: Client, user: Any, value: str, field: str,
+    client: Client,
+    user: User,
+    value: str,
+    field: str,
 ) -> None:
     client.force_login(user)
     if field == "input":
         body = (
-            '{"session_key":"thread","input":[{"role":"user","content":'
-            + value + '}]}'
+            '{"session_key":"thread","input":[{"role":"user","content":' + value + "}]}"
         )
     else:
         body = (
             '{"session_key":"thread","input":"hello",'
-            + json.dumps(field) + ':{"value":' + value + '}}'
+            + json.dumps(field)
+            + ':{"value":'
+            + value
+            + "}}"
         )
     response = client.post("/runs/", data=body, content_type="application/json")
     assert response.status_code == 400
@@ -623,13 +703,20 @@ def test_create_run_rejects_non_finite_json_numbers(
 @pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity", "1e999"])
 @pytest.mark.parametrize("field", ["config", "context"])
 def test_create_run_rejects_non_finite_form_json(
-    client: Client, user: Any, value: str, field: str,
+    client: Client,
+    user: User,
+    value: str,
+    field: str,
 ) -> None:
     client.force_login(user)
-    response = client.post("/runs/", data={
-        "session_key": "thread", "input": "hello",
-        field: '{"value":' + value + '}',
-    })
+    response = client.post(
+        "/runs/",
+        data={
+            "session_key": "thread",
+            "input": "hello",
+            field: '{"value":' + value + "}",
+        },
+    )
     assert response.status_code == 400
     assert not AgentSession.objects.exists()
     assert not AgentRun.objects.exists()
@@ -638,13 +725,12 @@ def test_create_run_rejects_non_finite_form_json(
 @pytest.mark.django_db()
 @pytest.mark.parametrize("depth", [101, 1001, 10_001])
 def test_create_run_rejects_json_beyond_supported_depth(
-    client: Client, user: Any, depth: int,
+    client: Client,
+    user: User,
+    depth: int,
 ) -> None:
     client.force_login(user)
-    body = (
-        '{"session_key":"thread","input":'
-        + "[" * depth + "0" + "]" * depth + "}"
-    )
+    body = '{"session_key":"thread","input":' + "[" * depth + "0" + "]" * depth + "}"
     response = client.post("/runs/", data=body, content_type="application/json")
     assert response.status_code == 400
     assert not AgentSession.objects.exists()
@@ -654,13 +740,19 @@ def test_create_run_rejects_json_beyond_supported_depth(
 @pytest.mark.django_db()
 @pytest.mark.parametrize("field", ["config", "context"])
 def test_create_run_rejects_form_json_beyond_supported_depth(
-    client: Client, user: Any, field: str,
+    client: Client,
+    user: User,
+    field: str,
 ) -> None:
     client.force_login(user)
-    response = client.post("/runs/", data={
-        "session_key": "thread", "input": "hello",
-        field: "[" * 101 + "0" + "]" * 101,
-    })
+    response = client.post(
+        "/runs/",
+        data={
+            "session_key": "thread",
+            "input": "hello",
+            field: "[" * 101 + "0" + "]" * 101,
+        },
+    )
     assert response.status_code == 400
     assert not AgentSession.objects.exists()
     assert not AgentRun.objects.exists()
@@ -669,22 +761,29 @@ def test_create_run_rejects_form_json_beyond_supported_depth(
 @pytest.mark.django_db()
 @pytest.mark.parametrize("as_json", [False, True])
 def test_create_run_accepts_supported_json_depth(
-    monkeypatch: pytest.MonkeyPatch, client: Client, user: Any, as_json: bool,
+    monkeypatch: pytest.MonkeyPatch,
+    client: Client,
+    user: User,
+    as_json: bool,
 ) -> None:
     client.force_login(user)
     monkeypatch.setattr(
-        "agentic_django.services.enqueue_agent_run", lambda run_id: None,
+        "agentic_django.services.enqueue_agent_run",
+        lambda run_id: None,
     )
     depth = 99 if as_json else 100
     context_text = "[" * depth + "0" + "]" * depth
     context = json.loads(context_text)
     payload = {
-        "session_key": "thread", "input": "hello",
+        "session_key": "thread",
+        "input": "hello",
         "context": context if as_json else context_text,
     }
     if as_json:
         response = client.post(
-            "/runs/", data=json.dumps(payload), content_type="application/json",
+            "/runs/",
+            data=json.dumps(payload),
+            content_type="application/json",
         )
     else:
         response = client.post("/runs/", data=payload)
@@ -698,20 +797,27 @@ def test_create_run_accepts_supported_json_depth(
 @pytest.mark.parametrize("as_json", [False, True])
 @pytest.mark.parametrize("text", ["NaN", "1e999", "[" * 101 + "0" + "]" * 101])
 def test_create_run_keeps_literal_text_during_json_validation(
-    monkeypatch: pytest.MonkeyPatch, client: Client, user: Any,
-    as_json: bool, text: str,
+    monkeypatch: pytest.MonkeyPatch,
+    client: Client,
+    user: User,
+    as_json: bool,
+    text: str,
 ) -> None:
     client.force_login(user)
     monkeypatch.setattr(
-        "agentic_django.services.enqueue_agent_run", lambda run_id: None,
+        "agentic_django.services.enqueue_agent_run",
+        lambda run_id: None,
     )
     payload = {
-        "session_key": "thread", "input": text,
+        "session_key": "thread",
+        "input": text,
         "context": text if as_json else json.dumps(text),
     }
     if as_json:
         response = client.post(
-            "/runs/", data=json.dumps(payload), content_type="application/json",
+            "/runs/",
+            data=json.dumps(payload),
+            content_type="application/json",
         )
     else:
         response = client.post("/runs/", data=payload)
@@ -729,6 +835,7 @@ def test_create_run_limits_owners_with_a_named_primary_key(
     from django.test.utils import isolate_apps
 
     with isolate_apps():
+
         class NamedKeyOwner(AbstractBaseUser):
             employee_key = models.CharField(primary_key=True, max_length=80)
 
@@ -740,16 +847,23 @@ def test_create_run_limits_owners_with_a_named_primary_key(
         calls = []
 
         def reject_request(
-            request_owner: Any, max_calls: int, period_seconds: int,
+            request_owner: object,
+            max_calls: int,
+            period_seconds: int,
         ) -> bool:
             calls.append((request_owner, max_calls, period_seconds))
             return False
 
         monkeypatch.setattr("agentic_django.views.admit_request", reject_request)
-        request = RequestFactory().post("/runs/", {
-            "session_key": "thread", "input": "hello",
-        })
-        request.user = owner
+        request = RequestFactory().post(
+            "/runs/",
+            {
+                "session_key": "thread",
+                "input": "hello",
+            },
+        )
+        # The Django plugin uses the default test user for request.user.
+        request.user = owner  # type: ignore[assignment]
         with override_settings(AGENTIC_DJANGO_RATE_LIMIT="1/m"):
             response = _enforce_request_limits(request)
 
@@ -761,7 +875,9 @@ def test_create_run_limits_owners_with_a_named_primary_key(
 @pytest.mark.django_db()
 @pytest.mark.parametrize("too_large", [False, True])
 def test_multipart_run_size_limit_with_valid_csrf(
-    monkeypatch: pytest.MonkeyPatch, user: Any, too_large: bool,
+    monkeypatch: pytest.MonkeyPatch,
+    user: User,
+    too_large: bool,
 ) -> None:
     from django.middleware.csrf import get_token
     from django.test.client import BOUNDARY, MULTIPART_CONTENT, encode_multipart
@@ -772,17 +888,65 @@ def test_multipart_run_size_limit_with_valid_csrf(
     csrf_token = get_token(csrf_request)
     client.cookies["csrftoken"] = csrf_request.META["CSRF_COOKIE"]
     monkeypatch.setattr(
-        "agentic_django.services.enqueue_agent_run", lambda run_id: None,
+        "agentic_django.services.enqueue_agent_run",
+        lambda run_id: None,
     )
-    body = encode_multipart(BOUNDARY, {
-        "session_key": "thread", "input": "hello",
-        "csrfmiddlewaretoken": csrf_token,
-    })
+    body = encode_multipart(
+        BOUNDARY,
+        {
+            "session_key": "thread",
+            "input": "hello",
+            "csrfmiddlewaretoken": csrf_token,
+        },
+    )
     max_bytes = len(body) - (1 if too_large else 0)
     with override_settings(AGENTIC_DJANGO_MAX_INPUT_BYTES=max_bytes):
         response = client.generic(
-            "POST", "/runs/", data=body, content_type=MULTIPART_CONTENT,
+            "POST",
+            "/runs/",
+            data=body,
+            content_type=MULTIPART_CONTENT,
         )
     assert response.status_code == (413 if too_large else 200)
     assert AgentRun.objects.count() == (0 if too_large else 1)
     assert AgentSession.objects.count() == (0 if too_large else 1)
+
+
+@pytest.mark.django_db()
+def test_create_run_rejects_input_that_does_not_match_sdk_schema(
+    client: Client,
+    user: User,
+) -> None:
+    client.force_login(user)
+    response = client.post(
+        "/runs/",
+        data=json.dumps(
+            {
+                "session_key": "thread",
+                "input": [{"role": "unknown", "content": "hello"}],
+            }
+        ),
+        content_type="application/json",
+    )
+    assert response.status_code == 400
+    assert response.json()["error"] == "Input items must match the SDK input schema"
+    assert not AgentSession.objects.exists()
+    assert not AgentRun.objects.exists()
+
+
+@pytest.mark.django_db()
+@pytest.mark.parametrize("config", [{"temperature": 0.2}, {"max_turns": "two"}])
+def test_create_run_rejects_invalid_run_options(
+    client: Client,
+    user: User,
+    config: object,
+) -> None:
+    client.force_login(user)
+    response = client.post(
+        "/runs/",
+        data=json.dumps({"session_key": "thread", "input": "hello", "config": config}),
+        content_type="application/json",
+    )
+    assert response.status_code == 400
+    assert not AgentSession.objects.exists()
+    assert not AgentRun.objects.exists()

@@ -4,11 +4,19 @@ import logging
 import traceback
 import uuid
 from collections import deque
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
 from threading import local
-from typing import Any
+from typing import TYPE_CHECKING, Protocol
 
+if TYPE_CHECKING:
+    from django.contrib.auth.base_user import AbstractBaseUser
+
+from agents import Agent, Runner
+from agents.items import TResponseInputItem
+from agents.memory.session import Session
+from agents.result import RunResult, RunResultStreaming
+from agents.stream_events import RunItemStreamEvent, StreamEvent
 from asgiref.sync import sync_to_async
 from django.conf import settings as django_settings
 from django.db import connection, transaction
@@ -16,14 +24,11 @@ from django.db.models import Max, Q
 from django.utils import timezone
 from django.utils.module_loading import import_string
 
-from agents import Runner
-from agents.stream_events import RunItemStreamEvent, StreamEvent
-
 from agentic_django.async_bridge import run_async
 from agentic_django.conf import get_concurrency_limit, get_settings
 from agentic_django.models import AgentEvent, AgentRun, AgentRunLock, AgentSession
 from agentic_django.registry import get_agent
-from agentic_django.serializers import JsonSerializer
+from agentic_django.serializers import EventSerializer, Serializer
 from agentic_django.sessions import get_session
 from agentic_django.signals import (
     agent_run_completed,
@@ -32,38 +37,69 @@ from agentic_django.signals import (
     agent_run_started,
     agent_session_created,
 )
+from agentic_django.types import (
+    JsonObject,
+    RunOptions,
+    json_value,
+    run_input,
+    run_options,
+)
 
 logger = logging.getLogger(__name__)
-_submission_state = local()
+
+
+class _SubmissionState(local):
+    pending: deque[tuple[str, str]] | None = None
+
+
+class StreamTask(Protocol):
+    def cancelled(self) -> bool: ...
+
+
+class EventStream(Protocol):
+    @property
+    def run_loop_task(self) -> StreamTask | None: ...
+    def stream_events(self) -> AsyncIterator[StreamEvent]: ...
+    def cancel(self) -> None: ...
+    def release_agents(self) -> None: ...
+
+
+_submission_state = _SubmissionState()
 
 
 def submit_agent_run(
     *,
-    owner: Any,
+    owner: AbstractBaseUser,
     session_key: str,
     agent_key: str,
-    input_payload: str | list[Any],
-    metadata: dict[str, Any] | None = None,
+    input_payload: str | list[TResponseInputItem],
+    metadata: JsonObject | None = None,
 ) -> AgentRun:
     """Create a run from validated input and enqueue it after commit."""
+    validated_input = run_input(input_payload)
+    validated_metadata = json_value(metadata if metadata is not None else {})
+    assert isinstance(validated_metadata, dict)
+    run_options(validated_metadata.get("run_options", {}))
     with transaction.atomic():
         # Lock session reuse before cleanup can check its age and contents.
         AgentSession.objects.filter(
-            session_key=session_key, owner=owner,
+            session_key=session_key,
+            owner_id=owner.pk,
         ).update(updated_at=timezone.now())
         # Initialize the configured backend before creating the local run.
         get_session(session_key, owner)
         session, created = AgentSession.objects.get_or_create(
-            session_key=session_key, owner=owner,
+            session_key=session_key,
+            owner_id=owner.pk,
         )
         if created:
             agent_session_created.send(sender=AgentSession, session=session)
         run = AgentRun.objects.create(
             session=session,
-            owner=owner,
+            owner_id=owner.pk,
             agent_key=agent_key,
-            input_payload=input_payload,
-            metadata=metadata if metadata is not None else {},
+            input_payload=json_value(validated_input),
+            metadata=validated_metadata,
         )
         enqueue_agent_run(str(run.id))
     return run
@@ -84,7 +120,7 @@ def enqueue_agent_run(run_id: str) -> None:
 def _enqueue_reserved_runs(reservations: list[tuple[str, str]]) -> None:
     from agentic_django.tasks import run_agent_task
 
-    pending = getattr(_submission_state, "pending", None)
+    pending = _submission_state.pending
     if pending is not None:
         pending.extend(reservations)
         return
@@ -100,7 +136,8 @@ def _enqueue_reserved_runs(reservations: list[tuple[str, str]]) -> None:
                 pending.appendleft((run_id, token))
                 for pending_id, pending_token in pending:
                     AgentRun.objects.filter(
-                        id=pending_id, task_id=pending_token,
+                        id=pending_id,
+                        task_id=pending_token,
                     ).update(task_id="", updated_at=timezone.now())
                 raise
             AgentRun.objects.filter(id=run_id, task_id=token).update(
@@ -127,8 +164,9 @@ def dispatch_pending_runs() -> int:
         else:
             pending_runs = pending_runs.select_for_update()
         active_sessions = set(
-            AgentRun.objects.filter(status=AgentRun.Status.RUNNING)
-            .values_list("session_id", flat=True)
+            AgentRun.objects.filter(status=AgentRun.Status.RUNNING).values_list(
+                "session_id", flat=True
+            )
         )
         while len(enqueued) < available:
             # Fetch one eligible row per slot without loading the full backlog.
@@ -159,7 +197,7 @@ def execute_run(run_id: str) -> None:
         _dispatch_after_run(run)
         return
 
-    result = None
+    result: RunResult | RunResultStreaming | None = None
     try:
         agent_run_started.send_robust(sender=AgentRun, run=run)
         serializer = _get_serializer()
@@ -176,18 +214,21 @@ def execute_run(run_id: str) -> None:
                 run_options=run_options,
             )
         else:
-            result = run_async(
-                Runner.run,
-                agent,
-                run.input_payload,
-                session=session,
-                context=context,
-                **run_options,
-            )
+
+            async def _run() -> RunResult:
+                return await Runner.run(
+                    agent,
+                    run_input(run.input_payload),
+                    session=session,
+                    context=context,
+                    **run_options,
+                )
+
+            result = run_async(_run)
         if result.interruptions:
             raise ValueError("Agent runs that require tool approval are not supported.")
-        run.final_output = serializer.serialize(result.final_output)
-        run.raw_responses = serializer.serialize(result.raw_responses)
+        run.final_output = json_value(serializer.serialize(result.final_output))
+        run.raw_responses = json_value(serializer.serialize(result.raw_responses))
         run.last_response_id = result.last_response_id or ""
         run.error = ""
         run.task_id = ""
@@ -237,7 +278,8 @@ def _dispatch_after_run(run: AgentRun) -> None:
         dispatch_pending_runs()
     except Exception:
         logger.exception(
-            "Failed to dispatch pending agent runs", extra={"run_id": str(run.id)},
+            "Failed to dispatch pending agent runs",
+            extra={"run_id": str(run.id)},
         )
 
 
@@ -269,21 +311,19 @@ def _dispatch_lock() -> Iterator[None]:
         yield
 
 
-def _build_run_options(run: AgentRun) -> dict[str, Any]:
-    default_options = dict(get_settings().default_run_options)
-    run_options = run.metadata.get("run_options", {})
-    if not isinstance(run_options, dict):
-        return default_options
-    default_options.update(run_options)
-    return default_options
+def _build_run_options(run: AgentRun) -> RunOptions:
+    options = get_settings().default_run_options.copy()
+    options.update(run_options(run.metadata.get("run_options", {})))
+    return options
 
 
-def _build_context(run: AgentRun) -> Any | None:
+def _build_context(run: AgentRun) -> object:
     context_factory_path = get_settings().context_factory
     if not context_factory_path:
         return None
     context_factory = import_string(context_factory_path)
-    return context_factory(run=run, metadata=run.metadata, owner=run.owner)
+    result: object = context_factory(run=run, metadata=run.metadata, owner=run.owner)
+    return result
 
 
 def _format_error(exc: Exception) -> str:
@@ -292,33 +332,39 @@ def _format_error(exc: Exception) -> str:
     return "The agent run failed. Contact support with the run ID."
 
 
-def _get_serializer() -> JsonSerializer:
+def _get_serializer() -> Serializer:
     serializer_path = get_settings().serializer
     serializer_cls = import_string(serializer_path)
-    return serializer_cls()
+    serializer: object = serializer_cls()
+    if not isinstance(serializer, Serializer):
+        raise ValueError("Serializer must define serialize and deserialize")
+    return serializer
 
 
-def _get_event_serializer() -> Any:
+def _get_event_serializer() -> EventSerializer:
     serializer_path = get_settings().event_serializer
     serializer_cls = import_string(serializer_path)
-    return serializer_cls()
+    serializer: object = serializer_cls()
+    if not isinstance(serializer, EventSerializer):
+        raise ValueError("Event serializer must define serialize")
+    return serializer
 
 
 def _run_with_events(
     *,
     run: AgentRun,
-    agent: Any,
-    session: Any,
-    context: Any | None,
-    run_options: dict[str, Any],
-) -> Any:
+    agent: Agent[object],
+    session: Session,
+    context: object,
+    run_options: RunOptions,
+) -> RunResultStreaming:
     event_serializer = _get_event_serializer()
     starting_sequence = _next_event_sequence(run)
 
-    async def _consume() -> Any:
+    async def _consume() -> RunResultStreaming:
         result = Runner.run_streamed(
             agent,
-            run.input_payload,
+            run_input(run.input_payload),
             session=session,
             context=context,
             **run_options,
@@ -337,8 +383,8 @@ def _run_with_events(
 async def _consume_stream_events(
     *,
     run: AgentRun,
-    result: Any,
-    event_serializer: Any,
+    result: EventStream,
+    event_serializer: EventSerializer,
     starting_sequence: int,
 ) -> None:
     sequence = starting_sequence
@@ -355,7 +401,8 @@ async def _consume_stream_events(
                 payload=payload,
             )
             await sync_to_async(_persist_event, thread_sensitive=True)(
-                run, stored_event,
+                run,
+                stored_event,
             )
             sequence += 1
         task = result.run_loop_task
@@ -364,10 +411,13 @@ async def _consume_stream_events(
     except BaseException:
         result.cancel()
         try:
-            await events.aclose()
+            close = getattr(events, "aclose", None)
+            if close is not None:
+                await close()
         except BaseException:
             logger.exception(
-                "Failed to close agent event stream", extra={"run_id": str(run.id)},
+                "Failed to close agent event stream",
+                extra={"run_id": str(run.id)},
             )
         finally:
             result.release_agents()
@@ -387,11 +437,17 @@ def _persist_event(run: AgentRun, event: AgentEvent) -> None:
 
 
 def _serialize_event(
-    event_serializer: Any,
+    event_serializer: EventSerializer,
     event: StreamEvent,
-) -> dict[str, Any] | None:
+) -> JsonObject | None:
     try:
-        return event_serializer.serialize(event)
+        serialized = event_serializer.serialize(event)
+        if serialized is None:
+            return None
+        payload = json_value(serialized)
+        if not isinstance(payload, dict):
+            raise ValueError("An event serializer must return a JSON object or None")
+        return payload
     except Exception:  # noqa: BLE001
         logger.exception(
             "Failed to serialize stream event",
@@ -412,7 +468,11 @@ def _next_event_sequence(run: AgentRun) -> int:
         .aggregate(max_sequence=Max("sequence"))
         .get("max_sequence")
     )
-    return (last_sequence or 0) + 1
+    if last_sequence is None:
+        return 1
+    if not isinstance(last_sequence, int):
+        raise TypeError("Event sequence must be an integer")
+    return last_sequence + 1
 
 
 def recover_stuck_runs(mode: str, *, include_pending: bool = False) -> int:

@@ -79,9 +79,7 @@ def test_repository_routes_are_resolved_markdown_links() -> None:
         linked_targets = links_by_source[source]
         missing_routes = sorted(str(path) for path in required_targets - linked_targets)
 
-        assert not missing_routes, (
-            f"{source} must link to: {', '.join(missing_routes)}"
-        )
+        assert not missing_routes, f"{source} must link to: {', '.join(missing_routes)}"
 
 
 def test_pyproject_exposes_canonical_validation_scripts() -> None:
@@ -90,7 +88,9 @@ def test_pyproject_exposes_canonical_validation_scripts() -> None:
 
     assert scripts["lint"] == "ruff check src tests"
     assert scripts["test"] == "pytest"
-    assert scripts["check"]["composite"] == ["lint", "test"]
+    assert scripts["typecheck"] == "mypy"
+    assert scripts["docs"] == "perfect-doc check --offline --no-banner"
+    assert scripts["check"]["composite"] == ["lint", "typecheck", "docs", "test"]
     assert config["tool"]["pdm"]["version"]["source"] == "scm"
 
 
@@ -144,8 +144,7 @@ def imported_modules(path: str) -> set[str]:
 
 def has_import(imports: set[str], module: str) -> bool:
     return any(
-        imported == module or imported.startswith(f"{module}.")
-        for imported in imports
+        imported == module or imported.startswith(f"{module}.") for imported in imports
     )
 
 

@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from concurrent.futures import CancelledError
 from types import SimpleNamespace
-from typing import Any
+from typing import Never, Unpack
+from uuid import UUID
 
 import pytest
 from agents import Agent, Model, RunConfig, Runner
-from agents.items import ModelResponse, TResponseStreamEvent
+from agents.items import ModelResponse, TResponseInputItem, TResponseStreamEvent
+from agents.memory import Session
 from agents.result import RunResultStreaming
+from django.contrib.auth.models import User
 from django.test import override_settings
 from django.utils import timezone
 
@@ -17,24 +20,25 @@ from agentic_django.models import AgentEvent, AgentRun, AgentSession
 from agentic_django.services import (
     _build_run_options,
     _persist_event,
-    submit_agent_run,
     dispatch_pending_runs,
     execute_run,
+    submit_agent_run,
 )
 from agentic_django.signals import (
     agent_run_completed,
     agent_run_event,
     agent_run_failed,
 )
+from agentic_django.types import JsonObject, JsonValue, RunOptions
 
 
 class DummyResult:
     def __init__(self) -> None:
-        self.final_output = {"ok": True}
+        self.final_output: JsonValue = {"ok": True}
         self.raw_responses = [{"id": "resp"}]
         self.last_response_id = "resp"
         self.released = False
-        self.interruptions: list[Any] = []
+        self.interruptions: list[object] = []
 
     def release_agents(self) -> None:
         self.released = True
@@ -48,21 +52,29 @@ class DummyTaskResult:
 @pytest.mark.django_db()
 @pytest.mark.parametrize("events", [False, True])
 def test_cancelled_sdk_model_marks_the_run_failed(
-    monkeypatch: pytest.MonkeyPatch, user: Any, events: bool,
+    monkeypatch: pytest.MonkeyPatch,
+    user: User,
+    events: bool,
 ) -> None:
     class CancelModel(Model):
-        async def get_response(self, *args: Any, **kwargs: Any) -> ModelResponse:
+        async def get_response(self, *args: object, **kwargs: object) -> ModelResponse:
             raise asyncio.CancelledError("model task cancelled")
 
         async def stream_response(
-            self, *args: Any, **kwargs: Any,
+            self,
+            *args: object,
+            **kwargs: object,
         ) -> AsyncIterator[TResponseStreamEvent]:
             raise asyncio.CancelledError("model task cancelled")
-            yield
+            # Keep this deliberately failing method an async generator.
+            yield  # type: ignore[unreachable]
 
     session = AgentSession.objects.create(session_key="cancelled", owner=user)
     run = AgentRun.objects.create(
-        session=session, owner=user, agent_key="default", input_payload="hello",
+        session=session,
+        owner=user,
+        agent_key="default",
+        input_payload="hello",
         task_id="cancelled-task",
     )
     model = CancelModel()
@@ -73,20 +85,37 @@ def test_cancelled_sdk_model_marks_the_run_failed(
     results: list[RunResultStreaming] = []
     original_runner = Runner.run_streamed
 
-    def capture(*args: Any, **kwargs: Any) -> RunResultStreaming:
-        result = original_runner(*args, **kwargs)
+    def capture(
+        starting_agent: Agent[object],
+        input: str | list[TResponseInputItem],
+        *,
+        context: object = None,
+        session: Session | None = None,
+        **options: Unpack[RunOptions],
+    ) -> RunResultStreaming:
+        result = original_runner(
+            starting_agent,
+            input,
+            context=context,
+            session=session,
+            **options,
+        )
         results.append(result)
         return result
 
     monkeypatch.setattr("agentic_django.services.Runner.run_streamed", capture)
-    completed: list[Any] = []
-    failed: list[Any] = []
+    completed: list[UUID] = []
+    failed: list[UUID] = []
 
-    def completed_receiver(sender: Any, **kwargs: Any) -> None:
-        completed.append(kwargs["run"].pk)
+    def completed_receiver(sender: object, **kwargs: object) -> None:
+        run_value = kwargs.get("run")
+        assert isinstance(run_value, AgentRun)
+        completed.append(run_value.pk)
 
-    def failed_receiver(sender: Any, **kwargs: Any) -> None:
-        failed.append(kwargs["run"].pk)
+    def failed_receiver(sender: object, **kwargs: object) -> None:
+        run_value = kwargs.get("run")
+        assert isinstance(run_value, AgentRun)
+        failed.append(run_value.pk)
 
     agent_run_completed.connect(completed_receiver, weak=False)
     agent_run_failed.connect(failed_receiver, weak=False)
@@ -119,14 +148,19 @@ def test_cancelled_sdk_model_marks_the_run_failed(
 @pytest.mark.django_db()
 @pytest.mark.parametrize("successful", [False, True])
 def test_followup_queue_failure_preserves_current_run_outcome(
-    monkeypatch: pytest.MonkeyPatch, user: Any, successful: bool,
+    monkeypatch: pytest.MonkeyPatch,
+    user: User,
+    successful: bool,
 ) -> None:
     session = AgentSession.objects.create(session_key="queue-error", owner=user)
     run = AgentRun.objects.create(
-        session=session, owner=user, agent_key="default", input_payload="hello",
+        session=session,
+        owner=user,
+        agent_key="default",
+        input_payload="hello",
     )
 
-    async def runner(*args: Any, **kwargs: Any) -> DummyResult:
+    async def runner(*args: object, **kwargs: object) -> DummyResult:
         if not successful:
             raise ValueError("original model error")
         return DummyResult()
@@ -150,25 +184,33 @@ def test_followup_queue_failure_preserves_current_run_outcome(
 
 @pytest.mark.django_db(transaction=True)
 def test_immediate_backend_completes_a_large_backlog(
-    monkeypatch: pytest.MonkeyPatch, user: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    user: User,
 ) -> None:
     session = AgentSession.objects.create(session_key="immediate-backlog", owner=user)
-    AgentRun.objects.bulk_create([
-        AgentRun(
-            session=session, owner=user, agent_key="default", input_payload="hello",
-        )
-        for _ in range(120)
-    ])
+    AgentRun.objects.bulk_create(
+        [
+            AgentRun(
+                session=session,
+                owner=user,
+                agent_key="default",
+                input_payload="hello",
+            )
+            for _ in range(120)
+        ]
+    )
 
-    async def runner(*args: Any, **kwargs: Any) -> DummyResult:
+    async def runner(*args: object, **kwargs: object) -> DummyResult:
         return DummyResult()
 
     monkeypatch.setattr("agentic_django.services.Runner.run", runner)
     with override_settings(
         AGENTIC_DJANGO_CONCURRENCY_LIMIT=1,
-        TASKS={"default": {
-            "BACKEND": "django_tasks.backends.immediate.ImmediateBackend",
-        }},
+        TASKS={
+            "default": {
+                "BACKEND": "django_tasks.backends.immediate.ImmediateBackend",
+            }
+        },
     ):
         dispatch_pending_runs()
     assert AgentRun.objects.filter(status=AgentRun.Status.COMPLETED).count() == 120
@@ -178,23 +220,30 @@ def test_immediate_backend_completes_a_large_backlog(
 @pytest.mark.django_db()
 @pytest.mark.parametrize("events", [False, True])
 def test_pending_approval_is_failed_and_result_references_are_released(
-    monkeypatch: pytest.MonkeyPatch, user: Any, events: bool,
+    monkeypatch: pytest.MonkeyPatch,
+    user: User,
+    events: bool,
 ) -> None:
     from agentic_django.signals import agent_run_completed
 
     session = AgentSession.objects.create(session_key="approval", owner=user)
     run = AgentRun.objects.create(
-        session=session, owner=user, agent_key="default", input_payload="hello",
+        session=session,
+        owner=user,
+        agent_key="default",
+        input_payload="hello",
     )
     result = DummyResult()
     result.interruptions = [object()]
     result.final_output = None
-    completed = []
+    completed: list[UUID] = []
 
-    def receiver(sender: Any, **kwargs: Any) -> None:
-        completed.append(kwargs["run"].pk)
+    def receiver(sender: object, **kwargs: object) -> None:
+        run_value = kwargs.get("run")
+        assert isinstance(run_value, AgentRun)
+        completed.append(run_value.pk)
 
-    async def runner(*args: Any, **kwargs: Any) -> DummyResult:
+    async def runner(*args: object, **kwargs: object) -> DummyResult:
         return result
 
     monkeypatch.setattr("agentic_django.services.Runner.run", runner)
@@ -215,7 +264,10 @@ def test_pending_approval_is_failed_and_result_references_are_released(
     assert result.released
 
 
-def _replace_run_task(monkeypatch: pytest.MonkeyPatch, enqueue: Any) -> None:
+def _replace_run_task(
+    monkeypatch: pytest.MonkeyPatch,
+    enqueue: Callable[[str], DummyTaskResult],
+) -> None:
     monkeypatch.setattr(
         "agentic_django.tasks.run_agent_task",
         SimpleNamespace(enqueue=enqueue),
@@ -223,7 +275,7 @@ def _replace_run_task(monkeypatch: pytest.MonkeyPatch, enqueue: Any) -> None:
 
 
 @pytest.mark.django_db()
-def test_build_run_options_merges_settings(user: Any) -> None:
+def test_build_run_options_merges_settings(user: User) -> None:
     session = AgentSession.objects.create(session_key="thread", owner=user)
     run = AgentRun.objects.create(
         session=session,
@@ -233,13 +285,18 @@ def test_build_run_options_merges_settings(user: Any) -> None:
         input_payload="hi",
         metadata={"run_options": {"max_turns": 2}},
     )
-    with override_settings(AGENTIC_DJANGO_DEFAULT_RUN_OPTIONS={"temperature": 0.2}):
+    default_run_config = RunConfig(tracing_disabled=True)
+    with override_settings(
+        AGENTIC_DJANGO_DEFAULT_RUN_OPTIONS={
+            "run_config": default_run_config,
+        }
+    ):
         options = _build_run_options(run)
-    assert options == {"temperature": 0.2, "max_turns": 2}
+    assert options == {"run_config": default_run_config, "max_turns": 2}
 
 
 @pytest.mark.django_db()
-def test_execute_run_success(monkeypatch: pytest.MonkeyPatch, user: Any) -> None:
+def test_execute_run_success(monkeypatch: pytest.MonkeyPatch, user: User) -> None:
     session = AgentSession.objects.create(session_key="thread", owner=user)
     run = AgentRun.objects.create(
         session=session,
@@ -251,10 +308,12 @@ def test_execute_run_success(monkeypatch: pytest.MonkeyPatch, user: Any) -> None
         task_id="task-success",
     )
 
-    async def fake_run(*args: Any, **kwargs: Any) -> DummyResult:
+    async def fake_run(*args: object, **kwargs: object) -> DummyResult:
         return DummyResult()
 
-    monkeypatch.setattr("agentic_django.services.get_agent", lambda key: object())
+    monkeypatch.setattr(
+        "agentic_django.services.get_agent", lambda key: Agent[object](name="test")
+    )
     monkeypatch.setattr("agentic_django.services.Runner.run", fake_run)
 
     execute_run(str(run.id))
@@ -271,7 +330,7 @@ def test_execute_run_success(monkeypatch: pytest.MonkeyPatch, user: Any) -> None
 
 
 @pytest.mark.django_db()
-def test_execute_run_failure(monkeypatch: pytest.MonkeyPatch, user: Any) -> None:
+def test_execute_run_failure(monkeypatch: pytest.MonkeyPatch, user: User) -> None:
     session = AgentSession.objects.create(session_key="thread", owner=user)
     run = AgentRun.objects.create(
         session=session,
@@ -283,10 +342,12 @@ def test_execute_run_failure(monkeypatch: pytest.MonkeyPatch, user: Any) -> None
         task_id="task-failure",
     )
 
-    async def failing_run(*args: Any, **kwargs: Any) -> DummyResult:
+    async def failing_run(*args: object, **kwargs: object) -> DummyResult:
         raise RuntimeError("boom")
 
-    monkeypatch.setattr("agentic_django.services.get_agent", lambda key: object())
+    monkeypatch.setattr(
+        "agentic_django.services.get_agent", lambda key: Agent[object](name="test")
+    )
     monkeypatch.setattr("agentic_django.services.Runner.run", failing_run)
 
     with pytest.raises(RuntimeError):
@@ -302,7 +363,7 @@ def test_execute_run_failure(monkeypatch: pytest.MonkeyPatch, user: Any) -> None
 
 @pytest.mark.django_db()
 def test_execute_run_failure_sanitized(
-    monkeypatch: pytest.MonkeyPatch, user: Any
+    monkeypatch: pytest.MonkeyPatch, user: User
 ) -> None:
     session = AgentSession.objects.create(session_key="thread", owner=user)
     run = AgentRun.objects.create(
@@ -314,10 +375,12 @@ def test_execute_run_failure_sanitized(
         metadata={},
     )
 
-    async def failing_run(*args: Any, **kwargs: Any) -> DummyResult:
+    async def failing_run(*args: object, **kwargs: object) -> DummyResult:
         raise RuntimeError("boom")
 
-    monkeypatch.setattr("agentic_django.services.get_agent", lambda key: object())
+    monkeypatch.setattr(
+        "agentic_django.services.get_agent", lambda key: Agent[object](name="test")
+    )
     monkeypatch.setattr("agentic_django.services.Runner.run", failing_run)
 
     with override_settings(DEBUG=False):
@@ -331,7 +394,7 @@ def test_execute_run_failure_sanitized(
 
 
 @pytest.mark.django_db(transaction=True)
-def test_dispatch_pending_runs(monkeypatch: pytest.MonkeyPatch, user: Any) -> None:
+def test_dispatch_pending_runs(monkeypatch: pytest.MonkeyPatch, user: User) -> None:
     session = AgentSession.objects.create(session_key="thread", owner=user)
     runs = [
         AgentRun.objects.create(
@@ -360,7 +423,7 @@ def test_dispatch_pending_runs(monkeypatch: pytest.MonkeyPatch, user: Any) -> No
 
 
 @pytest.mark.django_db()
-def test_persist_event_notifies_receivers_after_save(user: Any) -> None:
+def test_persist_event_notifies_receivers_after_save(user: User) -> None:
     session = AgentSession.objects.create(session_key="thread", owner=user)
     run = AgentRun.objects.create(
         session=session,
@@ -376,14 +439,16 @@ def test_persist_event_notifies_receivers_after_save(user: Any) -> None:
         payload={"type": "run_item_stream_event"},
     )
 
-    received: list[dict[str, Any]] = []
+    received: list[dict[str, object]] = []
 
-    def receiver(sender: Any, **kwargs: Any) -> None:
+    def receiver(sender: object, **kwargs: object) -> None:
         assert sender is AgentEvent
-        assert AgentEvent.objects.get(pk=kwargs["event"].pk).payload == event.payload
+        event_value = kwargs.get("event")
+        assert isinstance(event_value, AgentEvent)
+        assert AgentEvent.objects.get(pk=event_value.pk).payload == event.payload
         received.append(kwargs)
 
-    def broken_receiver(sender: Any, **kwargs: Any) -> None:
+    def broken_receiver(sender: object, **kwargs: object) -> None:
         raise RuntimeError("notification failed")
 
     agent_run_event.connect(broken_receiver, weak=False)
@@ -403,16 +468,25 @@ def test_persist_event_notifies_receivers_after_save(user: Any) -> None:
 
 @pytest.mark.django_db(transaction=True)
 def test_dispatch_preserves_another_workers_active_run(
-    monkeypatch: pytest.MonkeyPatch, user: Any
+    monkeypatch: pytest.MonkeyPatch, user: User
 ) -> None:
     session = AgentSession.objects.create(session_key="active", owner=user)
     active = AgentRun.objects.create(
-        session=session, owner=user, agent_key="default", input_payload="hi",
-        status=AgentRun.Status.RUNNING, task_id="active-worker",
+        session=session,
+        owner=user,
+        agent_key="default",
+        input_payload="hi",
+        status=AgentRun.Status.RUNNING,
+        task_id="active-worker",
     )
     monkeypatch.setattr("agentic_django.services.get_concurrency_limit", lambda: 1)
-    dispatched = []
-    _replace_run_task(monkeypatch, lambda run_id: dispatched.append(run_id))
+    dispatched: list[str] = []
+
+    def record_dispatch(run_id: str) -> DummyTaskResult:
+        dispatched.append(run_id)
+        return DummyTaskResult(run_id)
+
+    _replace_run_task(monkeypatch, record_dispatch)
     assert dispatch_pending_runs() == 0
     execute_run(str(active.id))
     active.refresh_from_db()
@@ -423,7 +497,7 @@ def test_dispatch_preserves_another_workers_active_run(
 
 @pytest.mark.django_db(transaction=True)
 def test_session_reservation_blocks_overlap_but_allows_other_sessions(
-    user: Any,
+    user: User,
 ) -> None:
     from agentic_django.services import _reserve_run_slot
 
@@ -447,13 +521,16 @@ def test_session_reservation_blocks_overlap_but_allows_other_sessions(
 
 @pytest.mark.django_db(transaction=True)
 def test_dispatch_selects_distinct_idle_sessions(
-    monkeypatch: pytest.MonkeyPatch, user: Any
+    monkeypatch: pytest.MonkeyPatch, user: User
 ) -> None:
     active = AgentSession.objects.create(session_key="active", owner=user)
     idle = AgentSession.objects.create(session_key="idle", owner=user)
     other = AgentSession.objects.create(session_key="other", owner=user)
     AgentRun.objects.create(
-        session=active, owner=user, agent_key="default", input_payload="hi",
+        session=active,
+        owner=user,
+        agent_key="default",
+        input_payload="hi",
         status=AgentRun.Status.RUNNING,
     )
     pending = [
@@ -462,7 +539,7 @@ def test_dispatch_selects_distinct_idle_sessions(
         )
         for target in (active, idle, idle, other)
     ]
-    sent = []
+    sent: list[str] = []
 
     def enqueue(run_id: str) -> DummyTaskResult:
         sent.append(run_id)
@@ -476,12 +553,13 @@ def test_dispatch_selects_distinct_idle_sessions(
 
 @pytest.mark.django_db(transaction=True)
 def test_initial_enqueue_waits_for_commit_and_is_discarded_on_rollback(
-    monkeypatch: pytest.MonkeyPatch, user: Any
+    monkeypatch: pytest.MonkeyPatch, user: User
 ) -> None:
     from django.db import transaction
+
     from agentic_django.services import enqueue_agent_run
 
-    sent = []
+    sent: list[str] = []
 
     def enqueue(run_id: str) -> DummyTaskResult:
         assert not transaction.get_connection().in_atomic_block
@@ -513,16 +591,18 @@ def test_initial_enqueue_waits_for_commit_and_is_discarded_on_rollback(
 
 @pytest.mark.django_db(transaction=True)
 def test_queue_failure_releases_unsent_batch_for_retry(
-    monkeypatch: pytest.MonkeyPatch, user: Any
+    monkeypatch: pytest.MonkeyPatch, user: User
 ) -> None:
     runs = [
         AgentRun.objects.create(
             session=AgentSession.objects.create(session_key=str(i), owner=user),
-            owner=user, agent_key="default", input_payload="hi",
+            owner=user,
+            agent_key="default",
+            input_payload="hi",
         )
         for i in range(3)
     ]
-    sent = []
+    sent: list[str] = []
 
     def enqueue(run_id: str) -> DummyTaskResult:
         if len(sent) == 1:
@@ -535,9 +615,9 @@ def test_queue_failure_releases_unsent_batch_for_retry(
         with pytest.raises(RuntimeError, match="queue unavailable"):
             dispatch_pending_runs()
         assert AgentRun.objects.get(id=runs[0].id).task_id == "accepted"
-        assert list(AgentRun.objects.exclude(id=runs[0].id).values_list(
-            "task_id", flat=True
-        )) == ["", ""]
+        assert list(
+            AgentRun.objects.exclude(id=runs[0].id).values_list("task_id", flat=True)
+        ) == ["", ""]
         _replace_run_task(
             monkeypatch,
             lambda run_id: DummyTaskResult("retried"),
@@ -547,14 +627,17 @@ def test_queue_failure_releases_unsent_batch_for_retry(
 
 @pytest.mark.django_db(transaction=True)
 def test_queue_failure_releases_nested_immediate_submissions(
-    monkeypatch: pytest.MonkeyPatch, user: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    user: User,
 ) -> None:
     from agentic_django.services import enqueue_agent_run
 
     runs = [
         AgentRun.objects.create(
             session=AgentSession.objects.create(session_key=f"nested-{i}", owner=user),
-            owner=user, agent_key="default", input_payload="hello",
+            owner=user,
+            agent_key="default",
+            input_payload="hello",
         )
         for i in range(3)
     ]
@@ -563,7 +646,8 @@ def test_queue_failure_releases_nested_immediate_submissions(
         if run_id != str(runs[0].pk):
             raise OSError("queue unavailable")
         AgentRun.objects.filter(pk=run_id).update(
-            status=AgentRun.Status.COMPLETED, task_id="",
+            status=AgentRun.Status.COMPLETED,
+            task_id="",
         )
         assert dispatch_pending_runs() == 2
         return DummyTaskResult("completed-task")
@@ -579,7 +663,7 @@ def test_queue_failure_releases_nested_immediate_submissions(
 
 @pytest.mark.django_db(transaction=True)
 def test_initial_queue_failure_can_be_retried(
-    monkeypatch: pytest.MonkeyPatch, user: Any
+    monkeypatch: pytest.MonkeyPatch, user: User
 ) -> None:
     from agentic_django.services import enqueue_agent_run
 
@@ -588,7 +672,7 @@ def test_initial_queue_failure_can_be_retried(
         session=session, owner=user, agent_key="default", input_payload="hi"
     )
 
-    def unavailable(run_id: str) -> None:
+    def unavailable(run_id: str) -> Never:
         raise RuntimeError("offline")
 
     _replace_run_task(monkeypatch, unavailable)
@@ -602,13 +686,16 @@ def test_initial_queue_failure_can_be_retried(
 
 @pytest.mark.django_db(transaction=True)
 def test_immediate_rejection_does_not_restore_obsolete_task_id(
-    monkeypatch: pytest.MonkeyPatch, user: Any
+    monkeypatch: pytest.MonkeyPatch, user: User
 ) -> None:
     from agentic_django.services import enqueue_agent_run
 
     session = AgentSession.objects.create(session_key="busy", owner=user)
     AgentRun.objects.create(
-        session=session, owner=user, agent_key="default", input_payload="hi",
+        session=session,
+        owner=user,
+        agent_key="default",
+        input_payload="hi",
         status=AgentRun.Status.RUNNING,
     )
     pending = AgentRun.objects.create(
@@ -629,7 +716,7 @@ def test_immediate_rejection_does_not_restore_obsolete_task_id(
 @pytest.mark.django_db()
 @pytest.mark.parametrize("signal_name", ["agent_run_started", "agent_run_completed"])
 def test_notification_failure_does_not_fail_successful_run(
-    monkeypatch: pytest.MonkeyPatch, user: Any, signal_name: str
+    monkeypatch: pytest.MonkeyPatch, user: User, signal_name: str
 ) -> None:
     from agentic_django import signals
 
@@ -639,19 +726,23 @@ def test_notification_failure_does_not_fail_successful_run(
     )
     received = []
 
-    def broken(sender: Any, **kwargs: Any) -> None:
+    def broken(sender: object, **kwargs: object) -> None:
         raise RuntimeError("notification failed")
 
-    def healthy(sender: Any, **kwargs: Any) -> None:
-        received.append(kwargs["run"].id)
+    def healthy(sender: object, **kwargs: object) -> None:
+        run_value = kwargs.get("run")
+        assert isinstance(run_value, AgentRun)
+        received.append(run_value.id)
 
-    async def runner(*args: Any, **kwargs: Any) -> DummyResult:
+    async def runner(*args: object, **kwargs: object) -> DummyResult:
         return DummyResult()
 
     signal = getattr(signals, signal_name)
     signal.connect(broken, weak=False)
     signal.connect(healthy, weak=False)
-    monkeypatch.setattr("agentic_django.services.get_agent", lambda key: object())
+    monkeypatch.setattr(
+        "agentic_django.services.get_agent", lambda key: Agent[object](name="test")
+    )
     monkeypatch.setattr("agentic_django.services.Runner.run", runner)
     try:
         execute_run(str(run.id))
@@ -666,7 +757,7 @@ def test_notification_failure_does_not_fail_successful_run(
 
 @pytest.mark.django_db()
 def test_serializer_setup_failure_releases_run_slot(
-    monkeypatch: pytest.MonkeyPatch, user: Any
+    monkeypatch: pytest.MonkeyPatch, user: User
 ) -> None:
     session = AgentSession.objects.create(session_key="setup", owner=user)
     run = AgentRun.objects.create(
@@ -691,7 +782,7 @@ def test_serializer_setup_failure_releases_run_slot(
 
 @pytest.mark.django_db()
 def test_failure_notification_preserves_original_error(
-    monkeypatch: pytest.MonkeyPatch, user: Any
+    monkeypatch: pytest.MonkeyPatch, user: User
 ) -> None:
     from agentic_django.signals import agent_run_failed
 
@@ -700,7 +791,7 @@ def test_failure_notification_preserves_original_error(
         session=session, owner=user, agent_key="default", input_payload="hi"
     )
 
-    def broken(sender: Any, **kwargs: Any) -> None:
+    def broken(sender: object, **kwargs: object) -> None:
         raise RuntimeError("notification failed")
 
     def broken_agent(key: str) -> None:
@@ -718,12 +809,15 @@ def test_failure_notification_preserves_original_error(
 
 
 @pytest.mark.django_db(transaction=True)
-def test_recovery_leaves_pending_reservations_unless_requested(user: Any) -> None:
+def test_recovery_leaves_pending_reservations_unless_requested(user: User) -> None:
     from agentic_django.services import recover_stuck_runs
 
     session = AgentSession.objects.create(session_key="reserved", owner=user)
     run = AgentRun.objects.create(
-        session=session, owner=user, agent_key="default", input_payload="hi",
+        session=session,
+        owner=user,
+        agent_key="default",
+        input_payload="hi",
         task_id="queued:abandoned",
     )
     assert recover_stuck_runs("fail") == 0
@@ -736,16 +830,19 @@ def test_recovery_leaves_pending_reservations_unless_requested(user: Any) -> Non
 @pytest.mark.parametrize("mode", ["fail", "requeue"])
 @pytest.mark.parametrize("task_id", ["queued:abandoned", "accepted-task-id"])
 def test_recovery_command_handles_abandoned_pending_reservations(
-    monkeypatch: pytest.MonkeyPatch, user: Any, mode: str, task_id: str
+    monkeypatch: pytest.MonkeyPatch, user: User, mode: str, task_id: str
 ) -> None:
     from django.core.management import call_command
 
     session = AgentSession.objects.create(session_key="reserved", owner=user)
     run = AgentRun.objects.create(
-        session=session, owner=user, agent_key="default", input_payload="hi",
+        session=session,
+        owner=user,
+        agent_key="default",
+        input_payload="hi",
         task_id=task_id,
     )
-    sent = []
+    sent: list[str] = []
 
     def enqueue(run_id: str) -> DummyTaskResult:
         sent.append(run_id)
@@ -767,23 +864,28 @@ def test_recovery_command_handles_abandoned_pending_reservations(
 
 @pytest.mark.django_db(transaction=True)
 def test_dispatch_limits_backlog_rows_read(
-    monkeypatch: pytest.MonkeyPatch, user: Any
+    monkeypatch: pytest.MonkeyPatch, user: User
 ) -> None:
     from django.db import connection
     from django.test.utils import CaptureQueriesContext
 
     session = AgentSession.objects.create(session_key="backlog", owner=user)
-    AgentRun.objects.bulk_create([
-        AgentRun(session=session, owner=user, agent_key="default", input_payload="hi")
-        for _ in range(100)
-    ])
+    AgentRun.objects.bulk_create(
+        [
+            AgentRun(
+                session=session, owner=user, agent_key="default", input_payload="hi"
+            )
+            for _ in range(100)
+        ]
+    )
     _replace_run_task(monkeypatch, lambda run_id: DummyTaskResult("accepted"))
     with override_settings(AGENTIC_DJANGO_CONCURRENCY_LIMIT=2):
         with CaptureQueriesContext(connection) as queries:
             assert dispatch_pending_runs() == 1
     # A session with a large backlog must not cause all pending rows to load.
     pending_selects = [
-        query["sql"] for query in queries.captured_queries
+        query["sql"]
+        for query in queries.captured_queries
         if query["sql"].startswith("SELECT") and '"task_id" = ' in query["sql"]
     ]
     assert pending_selects
@@ -791,12 +893,15 @@ def test_dispatch_limits_backlog_rows_read(
 
 
 @pytest.mark.django_db()
-def test_pending_recovery_preserves_unreserved_work(user: Any) -> None:
+def test_pending_recovery_preserves_unreserved_work(user: User) -> None:
     from agentic_django.services import recover_stuck_runs
 
     session = AgentSession.objects.create(session_key="unreserved", owner=user)
     run = AgentRun.objects.create(
-        session=session, owner=user, agent_key="default", input_payload="hi",
+        session=session,
+        owner=user,
+        agent_key="default",
+        input_payload="hi",
     )
     assert recover_stuck_runs("fail", include_pending=True) == 0
     run.refresh_from_db()
@@ -805,122 +910,150 @@ def test_pending_recovery_preserves_unreserved_work(user: Any) -> None:
 
 
 @pytest.mark.django_db(transaction=True)
-@pytest.mark.parametrize('backend', [
-    'agentic_django.sessions.DatabaseSession', 'tests.support.RecordingSession',
-])
+@pytest.mark.parametrize(
+    "backend",
+    [
+        "agentic_django.sessions.DatabaseSession",
+        "tests.support.RecordingSession",
+    ],
+)
 def test_submit_run_initializes_backend_and_notifies_once(
-    user: Any, monkeypatch: pytest.MonkeyPatch, backend: str,
+    user: User,
+    monkeypatch: pytest.MonkeyPatch,
+    backend: str,
 ) -> None:
     from agentic_django.signals import agent_session_created
     from tests.support import RecordingSession
 
     created = []
-    sent = []
+    sent: list[str] = []
     RecordingSession.called = False
 
-    def receiver(sender: Any, **kwargs: Any) -> None:
-        created.append(kwargs['session'].pk)
+    def receiver(sender: object, **kwargs: object) -> None:
+        session_value = kwargs.get("session")
+        assert isinstance(session_value, AgentSession)
+        created.append(session_value.pk)
 
     def enqueue(run_id: str) -> DummyTaskResult:
         from django.db import connection
+
         assert not connection.in_atomic_block
         assert AgentRun.objects.filter(pk=run_id).exists()
         sent.append(run_id)
-        return DummyTaskResult('submitted')
+        return DummyTaskResult("submitted")
 
     _replace_run_task(monkeypatch, enqueue)
-    metadata = {'context': {'topic': 'test'}, 'run_options': {'max_turns': 2}}
+    metadata: JsonObject = {
+        "context": {"topic": "test"},
+        "run_options": {"max_turns": 2},
+    }
     agent_session_created.connect(receiver, weak=False)
     try:
         with override_settings(AGENTIC_DJANGO_SESSION_BACKEND=backend):
             run = submit_agent_run(
-                owner=user, session_key='submission', agent_key='default',
-                input_payload='hello', metadata=metadata,
+                owner=user,
+                session_key="submission",
+                agent_key="default",
+                input_payload="hello",
+                metadata=metadata,
             )
     finally:
         agent_session_created.disconnect(receiver)
 
     run.refresh_from_db()
     assert run.owner == run.session.owner == user
-    assert run.input_payload == 'hello'
+    assert run.input_payload == "hello"
     assert run.metadata == metadata
     assert run.status == AgentRun.Status.PENDING
-    assert run.task_id == 'submitted'
+    assert run.task_id == "submitted"
     assert created == [run.session_id]
     assert sent == [str(run.pk)]
-    if backend == 'tests.support.RecordingSession':
+    if backend == "tests.support.RecordingSession":
         assert RecordingSession.called
 
 
 @pytest.mark.django_db(transaction=True)
 def test_submit_run_obeys_outer_transaction_commit_and_rollback(
-    user: Any, monkeypatch: pytest.MonkeyPatch,
+    user: User,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from django.db import transaction
 
-    sent = []
+    sent: list[str] = []
 
     def enqueue(run_id: str) -> DummyTaskResult:
         sent.append(run_id)
-        return DummyTaskResult('submitted')
+        return DummyTaskResult("submitted")
 
     _replace_run_task(monkeypatch, enqueue)
     with transaction.atomic():
         run = submit_agent_run(
-            owner=user, session_key='committed', agent_key='default',
-            input_payload='hello',
+            owner=user,
+            session_key="committed",
+            agent_key="default",
+            input_payload="hello",
         )
         assert sent == []
     assert sent == [str(run.pk)]
 
-    with pytest.raises(RuntimeError, match='rollback'), transaction.atomic():
+    with pytest.raises(RuntimeError, match="rollback"), transaction.atomic():
         submit_agent_run(
-            owner=user, session_key='rolled-back', agent_key='default',
-            input_payload='hello',
+            owner=user,
+            session_key="rolled-back",
+            agent_key="default",
+            input_payload="hello",
         )
-        raise RuntimeError('rollback')
+        raise RuntimeError("rollback")
     assert sent == [str(run.pk)]
-    assert not AgentSession.objects.filter(session_key='rolled-back').exists()
+    assert not AgentSession.objects.filter(session_key="rolled-back").exists()
     assert AgentRun.objects.count() == 1
 
 
 @pytest.mark.django_db()
 def test_submit_run_backend_failure_rolls_back_local_records(
-    user: Any, monkeypatch: pytest.MonkeyPatch,
+    user: User,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def failing_backend(session_key: str, owner: Any) -> None:
+    def failing_backend(session_key: str, owner: User) -> None:
         AgentSession.objects.create(session_key=session_key, owner=owner)
-        raise RuntimeError('backend failed')
+        raise RuntimeError("backend failed")
 
-    monkeypatch.setattr('agentic_django.services.get_session', failing_backend)
-    with pytest.raises(RuntimeError, match='backend failed'):
+    monkeypatch.setattr("agentic_django.services.get_session", failing_backend)
+    with pytest.raises(RuntimeError, match="backend failed"):
         submit_agent_run(
-            owner=user, session_key='failed', agent_key='default', input_payload='hi',
+            owner=user,
+            session_key="failed",
+            agent_key="default",
+            input_payload="hi",
         )
     assert not AgentSession.objects.exists()
     assert not AgentRun.objects.exists()
 
 
 @pytest.mark.django_db()
-def test_submit_run_reuses_only_the_owners_session(user: Any) -> None:
+def test_submit_run_reuses_only_the_owners_session(user: User) -> None:
     from datetime import timedelta
+
     from django.contrib.auth import get_user_model
 
-    other = get_user_model().objects.create_user(username='other-submitter')
-    own_session = AgentSession.objects.create(owner=user, session_key='shared-key')
-    other_session = AgentSession.objects.create(owner=other, session_key='shared-key')
+    other = get_user_model().objects.create_user(username="other-submitter")
+    own_session = AgentSession.objects.create(owner=user, session_key="shared-key")
+    other_session = AgentSession.objects.create(owner=other, session_key="shared-key")
     old_time = timezone.now() - timedelta(days=90)
     AgentSession.objects.update(updated_at=old_time)
-    own_session.items.create(sequence=1, payload={'content': 'existing history'})
+    own_session.items.create(sequence=1, payload={"content": "existing history"})
 
     run = submit_agent_run(
-        owner=user, session_key='shared-key', agent_key='default', input_payload='hi',
+        owner=user,
+        session_key="shared-key",
+        agent_key="default",
+        input_payload="hi",
     )
 
     own_session.refresh_from_db()
     other_session.refresh_from_db()
     assert run.session_id == own_session.pk
     assert own_session.updated_at > old_time
-    assert own_session.items.get().payload == {'content': 'existing history'}
+    assert own_session.items.get().payload == {"content": "existing history"}
     assert other_session.updated_at == old_time
     assert not other_session.runs.exists()

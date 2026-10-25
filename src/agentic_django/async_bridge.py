@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import atexit
 import asyncio
+import atexit
 import os
 from collections.abc import Awaitable, Callable
 from contextvars import Context, copy_context
 from threading import Event, Lock, Thread, current_thread
 from types import TracebackType
-from typing import Any, ParamSpec, TypeVar
+from typing import ParamSpec, TypeVar, cast
 
 from asgiref.current_thread_executor import CurrentThreadExecutor
 from asgiref.sync import SyncToAsync, async_to_sync
@@ -23,44 +23,55 @@ class _CallerThreadCall(SyncToAsync[P, T]):
         self,
         loop: asyncio.AbstractEventLoop,
         exc_info: tuple[
-            type[BaseException] | None, BaseException | None, TracebackType | None,
+            type[BaseException] | None,
+            BaseException | None,
+            TracebackType | None,
         ],
-        task_context: list[asyncio.Task[Any]],
-        function: Callable[..., T],
-        *args: Any,
-        **kwargs: Any,
+        task_context: list[asyncio.Task[object]],
+        func: Callable[P, T],
+        *args: P.args,
+        **kwargs: P.kwargs,
     ) -> T:
         # The base handler sets the caller's state to the bridge loop.
-        previous_state = self.threadlocal.__dict__.copy()
+        previous_state: dict[str, object] = self.threadlocal.__dict__.copy()
         try:
-            return super().thread_handler(
-                loop, exc_info, task_context, function, *args, **kwargs,
+            # asgiref leaves this internal method untyped. Its result is the
+            # result of func(*args, **kwargs), whose types are preserved here.
+            result = super().thread_handler(  # type: ignore[no-untyped-call]
+                loop,
+                exc_info,
+                task_context,
+                func,
+                *args,
+                **kwargs,
             )
+            return cast(T, result)
         finally:
             self.threadlocal.__dict__.clear()
             self.threadlocal.__dict__.update(previous_state)
 
 
-async def _invoke(
-    function: Callable[..., Awaitable[T]],
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-) -> T:
-    return await function(*args, **kwargs)
+async def _invoke(function: Callable[[], Awaitable[T]]) -> T:
+    return await function()
 
 
 async def _call_on_loop(
-    function: Callable[..., Awaitable[T]],
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
+    function: Callable[[], Awaitable[T]],
     executor: CurrentThreadExecutor,
     context: Context,
 ) -> T:
     caller = async_to_sync(_invoke)
-    # Enter asgiref from the caller thread so it can use this running loop.
+
+    def invoke_on_caller() -> T:
+        return context.run(caller, function)
+
+    # asgiref annotates executor as ThreadPoolExecutor, but only uses submit().
+    # CurrentThreadExecutor implements that interface and preserves DB locality.
     return await _CallerThreadCall(
-        context.run, thread_sensitive=False, executor=executor,
-    )(caller, function, args, kwargs)
+        invoke_on_caller,
+        thread_sensitive=False,
+        executor=executor,  # type: ignore[arg-type]
+    )()
 
 
 class _AsyncBridge:
@@ -75,8 +86,13 @@ class _AsyncBridge:
         )
         self.thread.start()
         self.ready.wait()
-        if self.error is not None or self.loop is None or not self.loop.is_running():
+        loop = self._started_loop()
+        if self.error is not None or loop is None or not loop.is_running():
             raise RuntimeError("Could not start the async bridge") from self.error
+
+    def _started_loop(self) -> asyncio.AbstractEventLoop | None:
+        # The loop thread sets this field before it signals ready.
+        return self.loop
 
     def _serve(self) -> None:
         try:
@@ -101,7 +117,9 @@ _bridge: _AsyncBridge | None = None
 
 
 def run_async(
-    function: Callable[P, Awaitable[T]], *args: P.args, **kwargs: P.kwargs,
+    function: Callable[P, Awaitable[T]],
+    *args: P.args,
+    **kwargs: P.kwargs,
 ) -> T:
     """Run async work on the shared loop and keep sync work on its caller."""
     global _bridge
@@ -121,8 +139,13 @@ def run_async(
         raise RuntimeError("The async bridge is not ready")
     executor = CurrentThreadExecutor(None)
     context = copy_context()
+
+    async def invoke() -> T:
+        return await function(*args, **kwargs)
+
     future = asyncio.run_coroutine_threadsafe(
-        _call_on_loop(function, args, kwargs, executor, context), loop,
+        _call_on_loop(invoke, executor, context),
+        loop,
     )
     try:
         executor.run_until_future(future)

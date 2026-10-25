@@ -1,0 +1,17 @@
+# Check documentation sources. Django templates require rendered HTML checks.
+include = ["**/*.md"]
+exclude = [
+    "**/.git/**", "**/.venv/**", "**/.pdm-build/**", "**/.mypy_cache/**",
+    "**/.pytest_cache/**", "**/dist/**", "**/node_modules/**",
+]
+
+[markdown]
+dialect = "gfm"
+anchors = "github"
+
+[links]
+# Source-directory links in the agent guide resolve to their Python entry point.
+index_files = ["index.md", "README.md", "index.html", "__init__.py"]
+
+[network]
+enabled = false

@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+from argparse import ArgumentParser
 from datetime import timedelta
-from typing import Any
+from typing import Literal, TypeVar
 
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
-from django.db.models import F, QuerySet
+from django.db.models import F, Model, QuerySet
 from django.utils import timezone
 
 from agentic_django.conf import get_settings, normalize_cleanup_policy
 from agentic_django.models import AgentEvent, AgentRun, AgentSession
+from agentic_django.types import CleanupPolicy
+
+M = TypeVar("M", bound=Model)
 
 DEFAULT_BATCH_SIZE = 500
 DEFAULT_RUN_STATUSES = [AgentRun.Status.COMPLETED, AgentRun.Status.FAILED]
@@ -18,7 +22,7 @@ DEFAULT_RUN_STATUSES = [AgentRun.Status.COMPLETED, AgentRun.Status.FAILED]
 class Command(BaseCommand):
     help = "Prune old Agentic Django data (runs, events, sessions)."
 
-    def add_arguments(self, parser: Any) -> None:
+    def add_arguments(self, parser: ArgumentParser) -> None:
         parser.add_argument("--events-days", type=int)
         parser.add_argument("--runs-days", type=int)
         parser.add_argument("--sessions-days", type=int)
@@ -38,7 +42,7 @@ class Command(BaseCommand):
         )
         parser.set_defaults(sessions_require_empty=None)
 
-    def handle(self, *args: Any, **options: Any) -> None:
+    def handle(self, *args: object, **options: object) -> None:
         policy = normalize_cleanup_policy(get_settings().cleanup_policy)
         policy = self._apply_overrides(policy, options)
 
@@ -91,29 +95,38 @@ class Command(BaseCommand):
 
     def _apply_overrides(
         self,
-        policy: dict[str, Any],
-        options: dict[str, Any],
-    ) -> dict[str, Any]:
-        updated = dict(policy)
+        policy: CleanupPolicy,
+        options: dict[str, object],
+    ) -> CleanupPolicy:
+        updated = policy.copy()
 
-        for key, option_key in (
-            ("events_days", "events_days"),
-            ("runs_days", "runs_days"),
-            ("sessions_days", "sessions_days"),
-            ("batch_size", "batch_size"),
-        ):
-            value = options.get(option_key)
+        keys: tuple[
+            Literal["events_days", "runs_days", "sessions_days", "batch_size"], ...
+        ] = (
+            "events_days",
+            "runs_days",
+            "sessions_days",
+            "batch_size",
+        )
+        for key in keys:
+            value = options.get(key)
             if value is None:
                 continue
-            if value < 1:
-                raise CommandError(f"{option_key} must be >= 1")
+            if type(value) is not int or value < 1:
+                raise CommandError(f"{key} must be an integer >= 1")
             updated[key] = value
 
-        if options.get("runs_statuses") is not None:
-            updated["runs_statuses"] = self._parse_statuses(options["runs_statuses"])
+        statuses = options.get("runs_statuses")
+        if statuses is not None:
+            if not isinstance(statuses, str):
+                raise CommandError("runs_statuses must be a string")
+            updated["runs_statuses"] = self._parse_statuses(statuses)
 
-        if options.get("sessions_require_empty") is not None:
-            updated["sessions_require_empty"] = options["sessions_require_empty"]
+        require_empty = options.get("sessions_require_empty")
+        if require_empty is not None:
+            if not isinstance(require_empty, bool):
+                raise CommandError("sessions_require_empty must be a boolean")
+            updated["sessions_require_empty"] = require_empty
 
         return updated
 
@@ -129,7 +142,7 @@ class Command(BaseCommand):
 
     def _delete_queryset(
         self,
-        queryset: QuerySet[Any],
+        queryset: QuerySet[M],
         batch_size: int,
         dry_run: bool,
     ) -> int:
@@ -145,9 +158,11 @@ class Command(BaseCommand):
                 break
             last_pk = ids[-1]
             with transaction.atomic(using=queryset.db):
-                rows = base.model.objects.using(queryset.db).filter(pk__in=ids)
+                rows = base.model._default_manager.using(queryset.db).filter(pk__in=ids)
                 # Write first so SQLite also locks before eligibility is read.
-                rows.update(**{base.model._meta.pk.name: F("pk")})
+                primary_key = base.model._meta.pk
+                assert primary_key is not None
+                rows.update(**{primary_key.name: F("pk")})
                 list(
                     rows.select_for_update().order_by("pk").values_list("pk", flat=True)
                 )

@@ -1,11 +1,12 @@
-from django.contrib.auth.models import AbstractUser
 from django.contrib.auth.base_user import AbstractBaseUser
+from django.contrib.auth.models import AbstractUser
 from django.db import models
 
 
 class User(AbstractUser):
     account_key = models.CharField(max_length=64, primary_key=True)
-    username = None
+    # This custom user has no username field.
+    username = None  # type: ignore[assignment]
     email = models.EmailField(unique=True)
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = []

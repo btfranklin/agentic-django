@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
+from agents.items import TResponseInputItem
+from django.contrib.auth.models import User
 from django.template import Context, Template
 
 
@@ -18,9 +18,10 @@ def test_pretty_json_formats_and_escapes_template_values() -> None:
 
 @pytest.mark.django_db()
 def test_conversation_tag_uses_configured_backend(
-    user: Any, monkeypatch: pytest.MonkeyPatch,
+    user: User, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from django.test import override_settings
+
     from agentic_django.models import AgentSession
     from tests.support import RecordingSession
 
@@ -28,13 +29,15 @@ def test_conversation_tag_uses_configured_backend(
     session.items.create(sequence=1, payload={'role': 'user', 'content': 'stale'})
     calls = []
 
-    def get_or_create(cls: Any, session_key: str, owner: Any) -> RecordingSession:
+    def get_or_create(
+        cls: type[RecordingSession], session_key: str, owner: User,
+    ) -> RecordingSession:
         calls.append((session_key, owner.pk))
         return cls(session_id=session_key)
 
     async def get_items(
         self: RecordingSession, limit: int | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[TResponseInputItem]:
         return [{'role': 'assistant', 'content': 'external history'}]
 
     monkeypatch.setattr(RecordingSession, 'get_or_create', classmethod(get_or_create))

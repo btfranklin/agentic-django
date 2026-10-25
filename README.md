@@ -324,7 +324,16 @@ positive integer or `None`; invalid values stop app startup.
 Run creation rejects non-finite JSON numbers and decoded JSON documents with
 more than 100 nested arrays or objects. This check applies to JSON request bodies
 and to JSON decoded from form `config` and `context` fields. Input text is stored
-as text.
+as text. Structured input items must match the SDK input schema. The `config`
+object accepts `max_turns`, `run_config`, `previous_response_id`,
+`auto_previous_response_id`, and `conversation_id`. Unknown option names and
+invalid types return HTTP 400. JSON `run_config` fields use the SDK dataclass
+schema. Settings can also supply typed SDK `hooks` and `error_handlers` objects.
+
+Use `JsonValue`, `JsonObject`, and `RunOptions` from `agentic_django.types` when
+integrating typed host code. Custom session backends use SDK `TResponseInputItem`
+values. Custom serializers implement the protocols in
+`agentic_django.serializers`; deserialized session items must match the SDK schema.
 
 SDK calls use one event loop per process so shared async clients can reuse their
 connections. The package does not provide tool approval or resume endpoints.

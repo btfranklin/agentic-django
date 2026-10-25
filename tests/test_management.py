@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import Any
 
 import pytest
+from django.contrib.auth.models import User
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import override_settings
@@ -13,7 +13,7 @@ from agentic_django.models import AgentEvent, AgentRun, AgentSession
 
 
 @pytest.mark.django_db()
-def test_cleanup_rejects_explicit_empty_statuses_without_deleting(user: Any) -> None:
+def test_cleanup_rejects_explicit_empty_statuses_without_deleting(user: User) -> None:
     session = AgentSession.objects.create(session_key="old", owner=user)
     run = AgentRun.objects.create(
         session=session, owner=user, agent_key="default", input_payload="hello",
@@ -28,7 +28,7 @@ def test_cleanup_rejects_explicit_empty_statuses_without_deleting(user: Any) -> 
 
 
 @pytest.mark.django_db()
-def test_cleanup_command_prunes_events(user: Any) -> None:
+def test_cleanup_command_prunes_events(user: User) -> None:
     session = AgentSession.objects.create(session_key="thread", owner=user)
     run = AgentRun.objects.create(
         session=session,
@@ -62,7 +62,7 @@ def test_cleanup_command_prunes_events(user: Any) -> None:
 
 
 @pytest.mark.django_db()
-def test_cleanup_command_prunes_runs(user: Any) -> None:
+def test_cleanup_command_prunes_runs(user: User) -> None:
     session = AgentSession.objects.create(session_key="thread", owner=user)
     run_old = AgentRun.objects.create(
         session=session,
@@ -103,7 +103,7 @@ def test_cleanup_command_prunes_runs(user: Any) -> None:
 
 
 @pytest.mark.django_db()
-def test_cleanup_command_prunes_empty_sessions(user: Any) -> None:
+def test_cleanup_command_prunes_empty_sessions(user: User) -> None:
     session_old = AgentSession.objects.create(session_key="old", owner=user)
     session_with_item = AgentSession.objects.create(session_key="with-item", owner=user)
     session_with_item.items.create(
@@ -123,7 +123,7 @@ def test_cleanup_command_prunes_empty_sessions(user: Any) -> None:
 
 
 @pytest.mark.django_db()
-def test_recover_runs_command_fails_running(user: Any) -> None:
+def test_recover_runs_command_fails_running(user: User) -> None:
     session = AgentSession.objects.create(session_key="thread", owner=user)
     run = AgentRun.objects.create(
         session=session,
@@ -143,13 +143,13 @@ def test_recover_runs_command_fails_running(user: Any) -> None:
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.parametrize("new_work", ["run", "item", "touch"])
 def test_cleanup_rechecks_session_after_concurrent_reuse(
-    user: Any, monkeypatch: pytest.MonkeyPatch, new_work: str
+    user: User, monkeypatch: pytest.MonkeyPatch, new_work: str
 ) -> None:
     from concurrent.futures import ThreadPoolExecutor
     from io import StringIO
 
     from django.db import close_old_connections
-    from django.db.models import QuerySet
+    from django.db.models import Model, QuerySet
 
     session = AgentSession.objects.create(session_key="reused", owner=user)
     old_time = timezone.now() - timedelta(days=2)
@@ -176,7 +176,7 @@ def test_cleanup_rechecks_session_after_concurrent_reuse(
         finally:
             close_old_connections()
 
-    def update_after_reuse(queryset: Any, **kwargs: Any) -> int:
+    def update_after_reuse(queryset: QuerySet[Model], **kwargs: object) -> int:
         nonlocal reused
         if queryset.model is AgentSession and "id" in kwargs and not reused:
             reused = True
@@ -201,7 +201,7 @@ def test_cleanup_rechecks_session_after_concurrent_reuse(
 @pytest.mark.django_db()
 @pytest.mark.parametrize("status", [AgentRun.Status.PENDING, AgentRun.Status.RUNNING])
 def test_nonempty_cleanup_keeps_sessions_with_active_runs(
-    user: Any, status: str
+    user: User, status: str
 ) -> None:
     session = AgentSession.objects.create(session_key="active", owner=user)
     run = AgentRun.objects.create(
@@ -224,7 +224,7 @@ def test_nonempty_cleanup_keeps_sessions_with_active_runs(
 
 @pytest.mark.django_db()
 def test_nonempty_cleanup_deletes_terminal_session_and_counts_only_sessions(
-    user: Any,
+    user: User,
 ) -> None:
     from io import StringIO
 
@@ -255,9 +255,9 @@ def test_nonempty_cleanup_deletes_terminal_session_and_counts_only_sessions(
 
 @pytest.mark.django_db()
 def test_cleanup_rechecks_run_status_after_candidate_selection(
-    user: Any, monkeypatch: pytest.MonkeyPatch
+    user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from django.db.models import QuerySet
+    from django.db.models import Model, QuerySet
 
     session = AgentSession.objects.create(session_key="requeued", owner=user)
     run = AgentRun.objects.create(
@@ -273,7 +273,7 @@ def test_cleanup_rechecks_run_status_after_candidate_selection(
     original_update = QuerySet.update
     requeued = False
 
-    def update_after_requeue(queryset: Any, **kwargs: Any) -> int:
+    def update_after_requeue(queryset: QuerySet[Model], **kwargs: object) -> int:
         nonlocal requeued
         if queryset.model is AgentRun and "id" in kwargs and not requeued:
             requeued = True

@@ -13,7 +13,8 @@ pdm run check
 pdm build
 ```
 
-`pdm run check` runs lint first, then the full pytest suite.
+`pdm run check` runs lint, strict Mypy, the offline documentation check, and the
+full pytest suite, in that order.
 
 ## Process
 

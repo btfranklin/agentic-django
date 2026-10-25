@@ -58,7 +58,7 @@ TIME_ZONE = "UTC"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
-AUTH_PASSWORD_VALIDATORS = []
+AUTH_PASSWORD_VALIDATORS: list[object] = []
 
 AGENTIC_DJANGO_AGENT_REGISTRY = "tests.support.get_agent_registry"
 AGENTIC_DJANGO_DEFAULT_AGENT_KEY = "default"

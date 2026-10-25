@@ -9,6 +9,7 @@ JSON and HTMX polling endpoints.
 | Area | Files | Responsibility |
 | --- | --- | --- |
 | App config | `src/agentic_django/apps.py` | Registers the Django app and validates settings during app startup. |
+| Types | `src/agentic_django/types.py` | Defines JSON, cleanup, and run-option types and validates SDK input items and options. |
 | Settings | `src/agentic_django/conf.py` | Reads and validates `AGENTIC_DJANGO_*` settings, cleanup policy, rate limits, and concurrency limits. |
 | Async bridge | `src/agentic_django/async_bridge.py` | Runs async SDK and session calls on one event loop per process. Preserves database work on the calling worker thread. |
 | Models | `src/agentic_django/models.py` | Stores sessions, ordered session items, runs, semantic events, per-owner request counters, and a global dispatch lock row. |
@@ -89,7 +90,8 @@ test for the behavior that made the edge necessary.
 ## Extension Points
 
 - `AGENTIC_DJANGO_AGENT_REGISTRY`: dotted path to a callable returning
-  `dict[str, Callable[[], Agent]]`.
+  `dict[str, Callable[[], Agent[object]]]`. The loader validates registry keys,
+  factories, and returned agents.
 - `AGENTIC_DJANGO_SESSION_BACKEND`: backend with
   `get_or_create(session_key, owner)`.
 - `AGENTIC_DJANGO_SESSION_ITEM_SERIALIZER`, `AGENTIC_DJANGO_SERIALIZER`, and
@@ -99,6 +101,21 @@ test for the behavior that made the edge necessary.
   `agent_run_completed`, `agent_run_failed`, and `agent_run_event`.
 - Template overrides: downstream projects may override
   `templates/agentic_django/...` paths.
+
+## Type Boundaries
+
+Package and test code use strict Mypy checks. JSON fields have explicit value
+types. JSON input is checked before storage. Session items use the SDK
+`TResponseInputItem` type and are checked after deserialization. Run options use
+`RunOptions`; unknown option names and invalid values are rejected. JSON
+`run_config` objects are checked against the SDK dataclass fields. Settings can
+also supply constructed SDK configuration and callback objects.
+
+Custom serializers implement the package serializer protocols. Session backends
+implement the SDK `Session` protocol and `get_or_create(session_key, owner)`.
+Runtime protocol checks verify required members. Host code must maintain callback
+signatures and match the context factory result to its agents. See
+[quality rules](quality.md#type-safety) for the small type-check exceptions.
 
 ## Lifecycle notifications
 

@@ -8,7 +8,10 @@ hyphens. This matches the session history URL. Keys remain scoped to the user.
 The `input` form field is plain text. Text that resembles JSON stays unchanged.
 To submit structured input items, send an `application/json` request with an
 `input` array. JSON request fields are decoded once. The `config` and `context`
-form fields can contain JSON.
+form fields can contain JSON. Structured input items must match the SDK input
+schema. `config` accepts `max_turns`, `run_config`, `previous_response_id`,
+`auto_previous_response_id`, and `conversation_id`. Unknown option names or invalid
+types return HTTP 400. JSON `run_config` fields use the SDK dataclass schema.
 
 ```html
 <form

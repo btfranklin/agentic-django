@@ -46,6 +46,8 @@ dev = [
     "pytest>=9.1.1",
     "pytest-django>=4.13.0",
     "ruff>=0.16.2",
+    "mypy>=2.4.0",
+    "django-stubs>=6.1.2",
 ]
 
 [project.optional-dependencies]
@@ -79,4 +81,23 @@ excludes = ["tests/**"]
 [tool.pdm.scripts]
 test = "pytest"
 lint = "ruff check src tests"
-check = {composite = ["lint", "test"]}
+typecheck = "mypy"
+docs = "perfect-doc check --offline --no-banner"
+check = {composite = ["lint", "typecheck", "docs", "test"]}
+
+[tool.mypy]
+files = ["src", "tests"]
+plugins = ["mypy_django_plugin.main", "pydantic.mypy"]
+strict = true
+disallow_any_explicit = true
+disallow_any_unimported = true
+warn_unreachable = true
+show_error_codes = true
+
+[tool.django-stubs]
+django_settings_module = "tests.settings"
+
+[tool.pydantic-mypy]
+init_typed = true
+init_forbid_extra = true
+warn_required_dynamic_aliases = true

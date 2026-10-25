@@ -74,3 +74,21 @@ def test_validate_settings_cleanup_policy_invalid_status() -> None:
     ):
         with pytest.raises(ImproperlyConfigured):
             validate_settings()
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"unknown": True},
+        {"max_turns": 0},
+        {"auto_previous_response_id": "yes"},
+        {"conversation_id": 4},
+    ],
+)
+def test_validate_settings_rejects_invalid_run_options(options: object) -> None:
+    with override_settings(
+        AGENTIC_DJANGO_AGENT_REGISTRY="tests.support.get_agent_registry",
+        AGENTIC_DJANGO_DEFAULT_RUN_OPTIONS=options,
+    ):
+        with pytest.raises(ImproperlyConfigured, match="DEFAULT_RUN_OPTIONS"):
+            validate_settings()

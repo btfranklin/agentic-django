@@ -1,31 +1,37 @@
 from __future__ import annotations
 
 import json
-import math
 import re
-from typing import Any
+from datetime import datetime
+from uuid import UUID
 
-from django.template.loader import render_to_string
-from django_htmx.http import HttpResponseStopPolling, trigger_client_event
+from django.contrib.auth.base_user import AbstractBaseUser
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
+from django.template.loader import render_to_string
 from django.views import View
+from django_htmx.http import HttpResponseStopPolling, trigger_client_event
 
 from agentic_django.async_bridge import run_async
 from agentic_django.conf import get_settings, parse_rate_limit
 from agentic_django.models import AgentEvent, AgentRun, AgentSession
-from agentic_django.registry import get_agent_registry
 from agentic_django.rate_limits import admit_request
+from agentic_django.registry import get_agent_registry
 from agentic_django.services import submit_agent_run
 from agentic_django.sessions import get_session
+from agentic_django.types import (
+    JsonObject,
+    JsonValue,
+    json_value,
+    run_input,
+    run_options,
+)
 
 RUN_UPDATE_TRIGGER = "run-update"
 MAX_QUERY_LIMIT = 2**63 - 1
 MAX_JSON_DEPTH = 100
-TERMINAL_RUN_STATUSES = frozenset(
-    {AgentRun.Status.COMPLETED, AgentRun.Status.FAILED}
-)
+TERMINAL_RUN_STATUSES = frozenset({AgentRun.Status.COMPLETED, AgentRun.Status.FAILED})
 
 
 class AgentRunCreateView(LoginRequiredMixin, View):
@@ -69,19 +75,27 @@ class AgentRunCreateView(LoginRequiredMixin, View):
         if agent_key not in registry:
             return JsonResponse({"error": "Unknown agent_key"}, status=400)
 
-        metadata: dict[str, Any] = {}
+        metadata: JsonObject = {}
         config_payload = payload.get("config")
-        if isinstance(config_payload, dict):
+        if config_payload is not None:
+            if not isinstance(config_payload, dict):
+                return JsonResponse({"error": "config must be an object"}, status=400)
             metadata["run_options"] = config_payload
         context_payload = payload.get("context")
         if context_payload is not None:
             metadata["context"] = context_payload
 
+        try:
+            validated_input = run_input(input_payload)
+            run_options(metadata.get("run_options", {}))
+        except ValueError as exc:
+            return JsonResponse({"error": str(exc)}, status=400)
+
         run = submit_agent_run(
-            owner=request.user,
+            owner=_authenticated_owner(request),
             session_key=session_key,
             agent_key=agent_key,
-            input_payload=input_payload,
+            input_payload=validated_input,
             metadata=metadata,
         )
 
@@ -91,7 +105,7 @@ class AgentRunCreateView(LoginRequiredMixin, View):
 
 
 class AgentRunDetailView(LoginRequiredMixin, View):
-    def get(self, request: HttpRequest, run_id: str) -> JsonResponse:
+    def get(self, request: HttpRequest, run_id: UUID) -> JsonResponse:
         run = get_object_or_404(AgentRun, id=run_id, owner=request.user)
         payload = {
             "run_id": str(run.id),
@@ -105,13 +119,13 @@ class AgentRunDetailView(LoginRequiredMixin, View):
 
 
 class AgentRunFragmentView(LoginRequiredMixin, View):
-    def get(self, request: HttpRequest, run_id: str) -> HttpResponse:
+    def get(self, request: HttpRequest, run_id: UUID) -> HttpResponse:
         run = get_object_or_404(AgentRun, id=run_id, owner=request.user)
         return _render_run_fragment_response(request, run)
 
 
 class AgentRunEventsView(LoginRequiredMixin, View):
-    def get(self, request: HttpRequest, run_id: str) -> JsonResponse:
+    def get(self, request: HttpRequest, run_id: UUID) -> JsonResponse:
         if not get_settings().enable_events:
             return JsonResponse({"error": "events disabled"}, status=404)
 
@@ -145,7 +159,7 @@ class AgentRunEventsView(LoginRequiredMixin, View):
 
 
 class AgentSessionItemsView(LoginRequiredMixin, View):
-    def get(self, request: HttpRequest, session_key: str) -> JsonResponse:
+    def get(self, request: HttpRequest, session_key: str) -> HttpResponse:
         session = get_object_or_404(
             AgentSession,
             session_key=session_key,
@@ -155,7 +169,9 @@ class AgentSessionItemsView(LoginRequiredMixin, View):
             limit = _parse_limit(request)
         except ValueError as exc:
             return JsonResponse({"error": str(exc)}, status=400)
-        backend_session = get_session(session.session_key, request.user)
+        backend_session = get_session(
+            session.session_key, _authenticated_owner(request)
+        )
         items = run_async(backend_session.get_items, limit)
         if _is_htmx(request):
             html_items = [{"payload": item} for item in items]
@@ -165,7 +181,6 @@ class AgentSessionItemsView(LoginRequiredMixin, View):
                 {"session": session, "items": html_items},
             )
         return JsonResponse({"session_key": session_key, "items": items})
-
 
 
 def _parse_limit(request: HttpRequest) -> int | None:
@@ -183,7 +198,7 @@ def _parse_limit(request: HttpRequest) -> int | None:
     return limit
 
 
-def _parse_payload(request: HttpRequest) -> dict[str, Any]:
+def _parse_payload(request: HttpRequest) -> JsonObject:
     if request.content_type and "application/json" in request.content_type:
         if not request.body:
             return {}
@@ -194,14 +209,14 @@ def _parse_payload(request: HttpRequest) -> dict[str, Any]:
         if not isinstance(payload, dict):
             raise ValueError("JSON payload must be an object")
         return payload
-    payload = request.POST.dict()
+    payload = {key: json_value(value) for key, value in request.POST.items()}
     for field in ("config", "context"):
         if field in payload:
             payload[field] = _parse_json_value(payload[field])
     return payload
 
 
-def _parse_json_value(value: Any) -> Any:
+def _parse_json_value(value: JsonValue) -> JsonValue:
     if isinstance(value, str):
         try:
             return _load_json(value)
@@ -210,23 +225,18 @@ def _parse_json_value(value: Any) -> Any:
     return value
 
 
-def _load_json(value: str | bytes) -> Any:
+def _load_json(value: str | bytes) -> JsonValue:
     try:
-        payload = json.loads(value)
+        return json_value(json.loads(value), max_depth=MAX_JSON_DEPTH)
     except RecursionError as exc:
         raise ValueError("JSON payload is nested too deeply") from exc
-    pending = [(payload, 0)]
-    while pending:
-        item, depth = pending.pop()
-        if isinstance(item, float) and not math.isfinite(item):
-            raise ValueError("JSON numbers must be finite")
-        if isinstance(item, (dict, list)):
-            depth += 1
-            if depth > MAX_JSON_DEPTH:
-                raise ValueError("JSON payload is nested too deeply")
-            children = item.values() if isinstance(item, dict) else item
-            pending.extend((child, depth) for child in children)
-    return payload
+
+
+def _authenticated_owner(request: HttpRequest) -> AbstractBaseUser:
+    owner = request.user
+    if not isinstance(owner, AbstractBaseUser):
+        raise ValueError("An authenticated user is required")
+    return owner
 
 
 def _is_htmx(request: HttpRequest) -> bool:
@@ -236,6 +246,7 @@ def _is_htmx(request: HttpRequest) -> bool:
 def _render_run_fragment_response(request: HttpRequest, run: AgentRun) -> HttpResponse:
     template_name = "agentic_django/partials/run_fragment.html"
     context = {"run": run}
+    response: HttpResponse
     if _is_htmx(request) and run.status in TERMINAL_RUN_STATUSES:
         response = HttpResponseStopPolling(
             render_to_string(template_name, context, request=request)
@@ -249,7 +260,7 @@ def _with_run_update_trigger(response: HttpResponse) -> HttpResponse:
     return trigger_client_event(response, RUN_UPDATE_TRIGGER)
 
 
-def _format_time(value: Any) -> str | None:
+def _format_time(value: datetime | None) -> str | None:
     if value is None:
         return None
     return value.isoformat()
@@ -275,12 +286,12 @@ def _enforce_request_limits(request: HttpRequest) -> JsonResponse | None:
     user_id = getattr(request.user, "pk", None)
     if user_id is None:
         return None
-    if not admit_request(request.user, max_calls, period_seconds):
+    if not admit_request(_authenticated_owner(request), max_calls, period_seconds):
         return JsonResponse({"error": "rate limit exceeded"}, status=429)
     return None
 
 
-def _enforce_input_limits(input_payload: Any) -> JsonResponse | None:
+def _enforce_input_limits(input_payload: JsonValue) -> JsonResponse | None:
     settings_config = get_settings()
     max_items = settings_config.max_input_items
     if max_items is None:

@@ -11,6 +11,7 @@ local knowledge.
 - Documentation: `pdm run docs`
 - Test: `pdm run test`
 - Full check: `pdm run check`
+- Release archives: `pdm build` followed by `pdm run package-check`
 
 `pdm run check` is the canonical before-commit validation command. It runs lint
 first, then strict Mypy, the offline documentation check, and the full pytest suite.
@@ -92,10 +93,14 @@ static documentation; template rendering remains covered by pytest.
 - [Python package workflow](../.github/workflows/python-package.yml) runs lint, strict type checks,
   and tests on Python 3.12, 3.13, and 3.14.
 - The same workflow runs the offline documentation check in a separate job.
-- [Python publishing workflow](../.github/workflows/python-publish.yml) builds
-  with PDM and publishes through PyPI trusted publishing on release publication.
-- [Draft release workflow](../.github/workflows/create-draft-release.yml) drafts
-  notes when version tags are pushed.
+- [Release verification](../.github/workflows/verify-release.yml) reuses the full
+  Python matrix and documentation jobs, then builds with PDM and checks the
+  wheel and source archive with Twine. It stores `verified-python-package`.
+- [Python publishing workflow](../.github/workflows/python-publish.yml) requires
+  that verification on release publication, then downloads the checked archives
+  and publishes through PyPI trusted publishing in the `release` environment.
+- [Draft release workflow](../.github/workflows/create-draft-release.yml) requires
+  the same verification on the tagged commit before drafting notes.
 - [Releasing](releasing.md) is the source of truth for release ordering. Push the
   version tag first so `release-notes-scribe` can populate the draft GitHub
   Release before publishing.

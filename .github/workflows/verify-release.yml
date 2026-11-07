@@ -1,0 +1,44 @@
+name: Verify Release
+
+on:
+    workflow_call:
+
+permissions:
+    contents: read
+
+jobs:
+    validation:
+        uses: ./.github/workflows/python-package.yml
+
+    package-verification:
+        needs: validation
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+        steps:
+            - uses: actions/checkout@v7
+              with:
+                  fetch-depth: 0
+                  ref: ${{ github.sha }}
+            - uses: actions/setup-python@v7
+              with:
+                  python-version: "3.12"
+            - uses: pdm-project/setup-pdm@v4
+              with:
+                  python-version: "3.12"
+                  cache: true
+                  cache-dependency-path: pdm.lock
+            - name: Install dependencies
+              run: pdm install --group dev --group rq
+            - name: Build package
+              run: pdm build
+            - name: Check package archives
+              run: pdm run package-check
+            - name: Store verified package archives
+              uses: actions/upload-artifact@v7
+              with:
+                  name: verified-python-package
+                  path: |
+                      dist/*.whl
+                      dist/*.tar.gz
+                  if-no-files-found: error
+                  retention-days: 7

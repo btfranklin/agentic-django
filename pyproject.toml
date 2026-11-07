@@ -48,6 +48,7 @@ dev = [
     "ruff>=0.16.2",
     "mypy>=2.4.0",
     "django-stubs>=6.1.2",
+    "twine>=7.0.0",
 ]
 
 [project.optional-dependencies]
@@ -79,6 +80,7 @@ package-dir = "src"
 excludes = ["tests/**"]
 
 [tool.pdm.scripts]
+package-check = "twine check --strict dist/*"
 test = "pytest"
 lint = "ruff check src tests"
 typecheck = "mypy"

@@ -39,19 +39,25 @@ git push origin vX.Y.Z
 - [Draft release workflow](../.github/workflows/create-draft-release.yml) runs on
   pushed `v*.*.*` tags. It requires
   [release verification](../.github/workflows/verify-release.yml) before drafting
-  release notes with `btfranklin/release-notes-scribe`.
+  the actual GitHub draft release and its notes with
+  `btfranklin/release-notes-scribe`.
 - Release verification reuses the Python 3.12, 3.13, and 3.14 lint, type, and test
   jobs and the offline documentation check. After they succeed, it builds the
   wheel and source archive, runs `pdm run package-check` (strict Twine metadata
-  checks), and stores the checked archives as `verified-python-package`.
+  checks). All these checks must succeed before draft creation.
 - [Python publishing workflow](../.github/workflows/python-publish.yml) runs when
-  a GitHub Release is published, requires the same verification against the
-  release commit, and publishes the resulting `verified-python-package`
-  archives to PyPI through trusted publishing. The publisher does not rebuild
-  or replace the checked archives.
+  a GitHub Release is published. It trusts draft preparation, checks out
+  `github.event.release.tag_name` with full tag history, rebuilds the archives,
+  and publishes to PyPI through trusted publishing in the `release` environment.
+  It does not rerun tests, lint, type checks, documentation, or archive checks,
+  and does not install development dependencies. PDM has no validation build
+  hooks, so building does not implicitly repeat those checks.
 - Versioning is SCM-derived through the PDM configuration in
   [pyproject.toml](../pyproject.toml).
 
-Do not publish the GitHub Release before the tag-triggered release-notes workflow
-has populated the draft. The PyPI publishing workflow does not generate release
-notes.
+The supported validated path is: push the version tag, wait for all checks and
+the generated draft, review it, then Publish. Creating a draft manually in GitHub
+does not trigger the tag workflow and does not prove that validation passed.
+Do not publish before the tag-triggered workflow has created the draft, or move
+the tag after validation. The PyPI publishing workflow does not generate release
+notes or establish that a manually created release was validated.

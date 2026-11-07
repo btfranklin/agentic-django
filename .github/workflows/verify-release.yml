@@ -33,12 +33,3 @@ jobs:
               run: pdm build
             - name: Check package archives
               run: pdm run package-check
-            - name: Store verified package archives
-              uses: actions/upload-artifact@v7
-              with:
-                  name: verified-python-package
-                  path: |
-                      dist/*.whl
-                      dist/*.tar.gz
-                  if-no-files-found: error
-                  retention-days: 7

@@ -25,4 +25,6 @@ jobs:
               with:
                   openai_api_key: ${{ secrets.OPENAI_API_KEY }}
                   github_token: ${{ secrets.GITHUB_TOKEN }}
+                  draft: "true"
+                  create_release: "true"
                   include_github_generated_notes: "true"

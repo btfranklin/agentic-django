@@ -95,12 +95,14 @@ static documentation; template rendering remains covered by pytest.
 - The same workflow runs the offline documentation check in a separate job.
 - [Release verification](../.github/workflows/verify-release.yml) reuses the full
   Python matrix and documentation jobs, then builds with PDM and checks the
-  wheel and source archive with Twine. It stores `verified-python-package`.
-- [Python publishing workflow](../.github/workflows/python-publish.yml) requires
-  that verification on release publication, then downloads the checked archives
-  and publishes through PyPI trusted publishing in the `release` environment.
+  wheel and source archive with Twine before the draft is created.
+- [Python publishing workflow](../.github/workflows/python-publish.yml) trusts
+  draft preparation, rebuilds archives from the published release tag, and
+  publishes through PyPI trusted publishing in the `release` environment.
+  It does not repeat validation or install development dependencies.
 - [Draft release workflow](../.github/workflows/create-draft-release.yml) requires
-  the same verification on the tagged commit before drafting notes.
+  the full verification on the tagged commit before creating the GitHub draft
+  release and its notes.
 - [Releasing](releasing.md) is the source of truth for release ordering. Push the
   version tag first so `release-notes-scribe` can populate the draft GitHub
   Release before publishing.
